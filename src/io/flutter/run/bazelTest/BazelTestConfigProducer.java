@@ -27,17 +27,10 @@ import org.jetbrains.annotations.Nullable;
  */
 public class BazelTestConfigProducer extends RunConfigurationProducer<BazelTestConfig> {
 
-  private final BazelTestConfigUtils bazelTestConfigUtils;
+  private final BazelTestConfigUtils bazelTestConfigUtils = BazelTestConfigUtils.getInstance();
 
   protected BazelTestConfigProducer() {
     super(FlutterBazelTestConfigurationType.getInstance());
-    bazelTestConfigUtils = BazelTestConfigUtils.getInstance();
-  }
-
-  @VisibleForTesting
-  BazelTestConfigProducer(BazelTestConfigUtils bazelTestConfigUtils) {
-    super(FlutterBazelTestConfigurationType.getInstance());
-    this.bazelTestConfigUtils = bazelTestConfigUtils;
   }
 
   private boolean isBazelFlutterContext(@NotNull ConfigurationContext context) {

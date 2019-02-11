@@ -137,7 +137,7 @@ public class BazelTestConfigProducerTest extends AbstractDartElementTest {
 
     TestBazelConfigProducer(boolean hasWorkspace,
                             boolean hasValidTestFile) {
-      super(BazelTestConfigUtils.getInstance());
+      super();
       fs = new MockVirtualFileSystem();
       fs.file("/workspace/WORKSPACE", "");
       fakeWorkspace = Workspace.forTest(
@@ -154,6 +154,8 @@ public class BazelTestConfigProducerTest extends AbstractDartElementTest {
       return hasWorkspace ? fakeWorkspace : null;
     }
 
+    // We override this method because the Dart file in question may not be part of the fixture.getProject(), which will cause file
+    // verification to fail.
     @Nullable
     @Override
     VirtualFile verifyFlutterTestFile(@NotNull BazelTestConfig config, @NotNull ConfigurationContext context, @NotNull DartFile file) {
