@@ -30,9 +30,6 @@ public class FlutterSettings {
   private static final String syncAndroidLibrariesKey = "io.flutter.syncAndroidLibraries";
   private static final String disableTrackWidgetCreationKey = "io.flutter.disableTrackWidgetCreation";
   private static final String useFlutterLogView = "io.flutter.useLogView";
-  // The Dart plugin uses this registry key to keep bazel users from getting their settings overridden on projects that include a
-  // pubspec.yaml.
-  private static final String ignorePubspecRegistryKey = "dart.projects.without.pubspec";
 
   // The Dart plugin uses this registry key to avoid bazel users getting their settings overridden on projects that include a
   // pubspec.yaml.
