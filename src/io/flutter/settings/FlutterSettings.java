@@ -34,10 +34,17 @@ public class FlutterSettings {
   // pubspec.yaml.
   private static final String ignorePubspecRegistryKey = "dart.projects.without.pubspec";
 
+  // The Dart plugin uses this registry key to avoid bazel users getting their settings overridden on projects that include a
+  // pubspec.yaml.
+  //
+  // In other words, this key tells the plugin to configure dart projects without pubspec.yaml.
+  private static final String dartProjectsWithoutPubspecRegistryKey = "dart.projects.without.pubspec";
+
   // Settings for UI as Code experiments.
   private static final String showBuildMethodGuidesKey = "io.flutter.editor.showBuildMethodGuides";
   private static final String showMultipleChildrenGuidesKey = "io.flutter.editor.showMultipleChildrenGuides";
   private static final String showBuildMethodsOnScrollbarKey = "io.flutter.editor.showBuildMethodsOnScrollbarKey";
+  private static final String disableDartClosingLabelsKey = "io.flutter.editor.disableDartClosingLabelsKey";
 
   public static FlutterSettings getInstance() {
     return ServiceManager.getService(FlutterSettings.class);
@@ -101,10 +108,15 @@ public class FlutterSettings {
     if (isShowBuildMethodsOnScrollbar()) {
       analytics.sendEvent("settings", afterLastPeriod(showBuildMethodsOnScrollbarKey));
     }
+    if (!isDisableDartClosingLabels()) {
+      // The default value is true so only send the event if the setting was turned off.
+      analytics.sendEvent("settings", afterLastPeriod(disableDartClosingLabelsKey + "_off"));
+    }
 
     if (useFlutterLogView()) {
       analytics.sendEvent("settings", afterLastPeriod(useFlutterLogView));
     }
+
     if (useBazelByDefault()) {
       analytics.sendEvent("settings", afterLastPeriod(ignorePubspecRegistryKey));
     }
@@ -227,14 +239,15 @@ public class FlutterSettings {
     fireEvent();
   }
 
+  /**
+   * Determines whether to use bazel project.
+   */
   public boolean useBazelByDefault() {
-    return Registry.is(ignorePubspecRegistryKey, false);
+    return Registry.is(dartProjectsWithoutPubspecRegistryKey, false);
   }
 
   public void setUseBazelByDefault(boolean value) {
-    Registry.get(ignorePubspecRegistryKey).setValue(value);
-
-    fireEvent();
+    Registry.get(dartProjectsWithoutPubspecRegistryKey).setValue(value);
   }
 
   /**
@@ -275,6 +288,17 @@ public class FlutterSettings {
 
     fireEvent();
   }
+
+  public boolean isDisableDartClosingLabels() {
+    return getPropertiesComponent().getBoolean(disableDartClosingLabelsKey, true);
+  }
+
+  public void setDisableDartClosingLabels(boolean value) {
+    getPropertiesComponent().setValue(disableDartClosingLabelsKey, value, true);
+
+    fireEvent();
+  }
+
 
   public boolean isShowMultipleChildrenGuides() {
     return getPropertiesComponent().getBoolean(showMultipleChildrenGuidesKey, false);

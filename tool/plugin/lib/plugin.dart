@@ -231,6 +231,8 @@ Future<bool> performReleaseChecks(ProductCommand cmd) async {
       var branch = await gitDir.getCurrentBranch();
       var name = branch.branchName;
       var result = name == "release_${cmd.releaseMajor}";
+      if (!result) result = name.startsWith("release_${cmd.releaseMajor}")
+          && name.lastIndexOf(new RegExp("\.[0-9]")) == name.length - 2;
       if (result) {
         if (isTravisFileValid()) {
           return new Future(() => result);
@@ -287,12 +289,6 @@ String substituteTemplateVariables(String line, BuildSpec spec) {
         return spec.isSynthetic
             ? 'com.intellij.modules.androidstudio'
             : 'com.android.tools.apk';
-      case 'PROJECTSYSTEM':
-        // Temporary work-around for 3.0 vs 3.1 AS incompatibility.
-        // TODO(messick) Delete this when we are SURE we do not need to build version < 3.1
-        return spec.version == '3.1'
-            ? '<projectsystem implementation="io.flutter.project.FlutterProjectSystemProvider"/>'
-            : '';
       default:
         throw 'unknown template variable: $name';
     }
@@ -1106,7 +1102,7 @@ class TestCommand extends ProductCommand {
     for (var spec in specs) {
       await spec.artifacts.provision();
 
-      //TODO(messick) Finish the implementation of TestCommand.
+      // TODO(messick) Finish the implementation of TestCommand.
       separator('Compiling test sources');
 
       var jars = []
