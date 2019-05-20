@@ -29,7 +29,6 @@ import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.Balloon;
-import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.ToolWindowId;
@@ -49,7 +48,6 @@ import io.flutter.actions.ProjectActions;
 import io.flutter.actions.ReloadFlutterApp;
 import io.flutter.pub.PubRoot;
 import io.flutter.pub.PubRoots;
-import io.flutter.run.daemon.DeviceService;
 import io.flutter.run.daemon.FlutterApp;
 import io.flutter.run.daemon.FlutterDevice;
 import io.flutter.run.daemon.RunMode;
@@ -73,10 +71,6 @@ import java.util.stream.Collectors;
  * Handle the mechanics of performing a hot reload on file save.
  */
 public class FlutterReloadManager {
-  private static final String RESTART_SUGGESTED_TEXT =
-    "Not all changed program elements ran during view reassembly; consider restarting ("
-    + (SystemInfo.isMac ? "⇧⌘S" : "⇧^S") + ").";
-
   private static final Logger LOG = Logger.getInstance(FlutterReloadManager.class);
 
   private static final Map<String, NotificationGroup> toolWindowNotificationGroups = new HashMap<>();
@@ -176,7 +170,7 @@ public class FlutterReloadManager {
       return;
     }
 
-    if (!app.getLaunchMode().supportsReload()) {
+    if (!app.getLaunchMode().supportsReload() || !app.appSupportsHotReload()) {
       return;
     }
 
@@ -196,14 +190,17 @@ public class FlutterReloadManager {
         return;
       }
 
-      if (hasErrors(app.getProject(), app.getModule(), editor.getDocument())) {
+      // If the analysis server detects any errors in the project, it will not perform a hot reload.
+      // This can cause hot reload to stop working needlessly when, eg, there is an analysis error in a test file.
+      // The reloadWithError option in settings is a workaround.
+      // See https://github.com/flutter/flutter/issues/27618 for the high-level goal.
+      if (hasErrors(app.getProject(), app.getModule(), editor.getDocument()) && !mySettings.isReloadWithError()) {
         handlingSave.set(false);
 
         showAnalysisNotification("Reload not performed", "Analysis issues found", true);
 
         return;
       }
-
       final Notification notification = showRunNotification(app, null, "Reloading…", false);
       final long startTime = System.currentTimeMillis();
 
@@ -211,10 +208,6 @@ public class FlutterReloadManager {
         if (!result.ok()) {
           notification.expire();
           showRunNotification(app, "Hot Reload Error", result.getMessage(), true);
-        }
-        else if (result.isRestartRecommended()) {
-          notification.expire();
-          showRunNotification(app, "Reloading…", RESTART_SUGGESTED_TEXT, false);
         }
         else {
           // Make sure the reloading message is displayed for at least 2 seconds (so it doesn't just flash by).
@@ -233,16 +226,11 @@ public class FlutterReloadManager {
     }, reloadDelayMs, TimeUnit.MILLISECONDS);
   }
 
-  public void saveAllAndReload(@NotNull FlutterApp app, String reason) {
+  private void reloadApp(@NotNull FlutterApp app, @NotNull String reason) {
     if (app.isStarted()) {
-      FileDocumentManager.getInstance().saveAllDocuments();
-
       app.performHotReload(true, reason).thenAccept(result -> {
         if (!result.ok()) {
           showRunNotification(app, "Hot Reload", result.getMessage(), true);
-        }
-        else if (result.isRestartRecommended()) {
-          showRunNotification(app, "Reloading…", RESTART_SUGGESTED_TEXT, false);
         }
       }).exceptionally(throwable -> {
         showRunNotification(app, "Hot Reload", throwable.getMessage(), true);
@@ -251,9 +239,21 @@ public class FlutterReloadManager {
     }
   }
 
-  public void saveAllAndRestart(@NotNull FlutterApp app, String reason) {
+  public void saveAllAndReload(@NotNull FlutterApp app, @NotNull String reason) {
+    FileDocumentManager.getInstance().saveAllDocuments();
+    reloadApp(app, reason);
+  }
+
+  public void saveAllAndReloadAll(@NotNull List<FlutterApp> appsToReload, @NotNull String reason) {
+    FileDocumentManager.getInstance().saveAllDocuments();
+
+    for (FlutterApp app : appsToReload) {
+      reloadApp(app, reason);
+    }
+  }
+
+  private void restartApp(@NotNull FlutterApp app, @NotNull String reason) {
     if (app.isStarted()) {
-      FileDocumentManager.getInstance().saveAllDocuments();
       app.performRestartApp(reason).thenAccept(result -> {
         if (!result.ok()) {
           showRunNotification(app, "Hot Restart", result.getMessage(), true);
@@ -263,10 +263,23 @@ public class FlutterReloadManager {
         return null;
       });
 
-      final FlutterDevice device = DeviceService.getInstance(myProject).getSelectedDevice();
+      final FlutterDevice device = app.device();
       if (device != null) {
         device.bringToFront();
       }
+    }
+  }
+
+  public void saveAllAndRestart(@NotNull FlutterApp app, @NotNull String reason) {
+    FileDocumentManager.getInstance().saveAllDocuments();
+    restartApp(app, reason);
+  }
+
+  public void saveAllAndRestartAll(@NotNull List<FlutterApp> appsToRestart, @NotNull String reason) {
+    FileDocumentManager.getInstance().saveAllDocuments();
+
+    for (FlutterApp app : appsToRestart) {
+      restartApp(app, reason);
     }
   }
 
@@ -335,11 +348,6 @@ public class FlutterReloadManager {
     if (balloon != null) {
       balloon.hide();
     }
-  }
-
-  private FlutterApp getApp() {
-    final AnAction action = ProjectActions.getAction(myProject, ReloadFlutterApp.ID);
-    return action instanceof FlutterAppAction ? ((FlutterAppAction)action).getApp() : null;
   }
 
   private boolean hasErrors(@NotNull Project project, @Nullable Module module, @NotNull Document document) {

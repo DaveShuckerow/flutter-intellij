@@ -13,14 +13,18 @@ import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.project.ProjectType;
+import com.intellij.openapi.project.ProjectTypeService;
 import com.intellij.openapi.startup.StartupActivity;
 import com.intellij.openapi.ui.Messages;
 import icons.FlutterIcons;
 import io.flutter.pub.PubRoot;
 import io.flutter.pub.PubRoots;
 import io.flutter.sdk.FlutterSdk;
+import io.flutter.settings.FlutterSettings;
 import io.flutter.utils.FlutterModuleUtils;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Runs startup actions just after a project is opened, before it's indexed.
@@ -28,7 +32,16 @@ import org.jetbrains.annotations.NotNull;
  * @see FlutterInitializer for actions that run later.
  */
 public class ProjectOpenActivity implements StartupActivity, DumbAware {
+  public static final ProjectType FLUTTER_PROJECT_TYPE = new ProjectType("io.flutter");
   private static final Logger LOG = Logger.getInstance(ProjectOpenActivity.class);
+
+  @Nullable private FlutterSettings settings;
+
+  public ProjectOpenActivity() {}
+
+  public ProjectOpenActivity(@NotNull FlutterSettings settings) {
+    this.settings = settings;
+  }
 
   @Override
   public void runActivity(@NotNull Project project) {
@@ -42,10 +55,18 @@ public class ProjectOpenActivity implements StartupActivity, DumbAware {
       return;
     }
 
+    // If this project is intended as a bazel project, don't run the pub alerts.
+    if (settings != null && settings.shouldUseBazel()) {
+      return;
+    }
+
     for (PubRoot pubRoot : PubRoots.forProject(project)) {
       if (!pubRoot.hasUpToDatePackages()) {
         Notifications.Bus.notify(new PackagesOutOfDateNotification(project, pubRoot));
       }
+    }
+    if (!FLUTTER_PROJECT_TYPE.equals(ProjectTypeService.getProjectType(project))) {
+      ProjectTypeService.setProjectType(project, FLUTTER_PROJECT_TYPE);
     }
   }
 
@@ -64,7 +85,7 @@ public class ProjectOpenActivity implements StartupActivity, DumbAware {
 
       addAction(new AnAction("Run 'flutter packages get'") {
         @Override
-        public void actionPerformed(AnActionEvent event) {
+        public void actionPerformed(@NotNull AnActionEvent event) {
           expire();
 
           final FlutterSdk sdk = FlutterSdk.getFlutterSdk(project);

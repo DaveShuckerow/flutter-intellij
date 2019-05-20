@@ -29,9 +29,9 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.EventDispatcher;
 import com.intellij.util.concurrency.AppExecutorUtil;
-import com.jetbrains.lang.dart.ide.runner.ObservatoryConnector;
 import io.flutter.FlutterInitializer;
 import io.flutter.FlutterUtils;
+import io.flutter.ObservatoryConnector;
 import io.flutter.logging.FlutterLog;
 import io.flutter.pub.PubRoot;
 import io.flutter.pub.PubRoots;
@@ -68,7 +68,9 @@ public class FlutterApp {
   private final @NotNull Project myProject;
   private final @Nullable Module myModule;
   private final @NotNull RunMode myMode;
-  private final @NotNull FlutterDevice myDevice;
+  // TODO(jwren): myDevice is not-null for all run configurations except flutter web configurations
+  // See https://github.com/flutter/flutter-intellij/issues/3293.
+  private final @Nullable FlutterDevice myDevice;
   private final @NotNull ProcessHandler myProcessHandler;
   private final @NotNull ExecutionEnvironment myExecutionEnvironment;
   private final @NotNull DaemonApi myDaemonApi;
@@ -78,6 +80,8 @@ public class FlutterApp {
   private @Nullable String myWsUrl;
   private @Nullable String myBaseUri;
   private @Nullable ConsoleView myConsole;
+
+  private boolean isFlutterWeb = false;
 
   /**
    * The command with which the app was launched.
@@ -122,7 +126,7 @@ public class FlutterApp {
   FlutterApp(@NotNull Project project,
              @Nullable Module module,
              @NotNull RunMode mode,
-             @NotNull FlutterDevice device,
+             @Nullable FlutterDevice device,
              @NotNull ProcessHandler processHandler,
              @NotNull ExecutionEnvironment executionEnvironment,
              @NotNull DaemonApi daemonApi,
@@ -193,7 +197,7 @@ public class FlutterApp {
   }
 
   @Nullable
-  public static FlutterApp fromProjectProcess(@NotNull Project project) {
+  public static FlutterApp firstFromProjectProcess(@NotNull Project project) {
     final List<RunContentDescriptor> runningProcesses =
       ExecutionManager.getInstance(project).getContentManager().getAllDescriptors();
     for (RunContentDescriptor descriptor : runningProcesses) {
@@ -209,6 +213,24 @@ public class FlutterApp {
     return null;
   }
 
+  @NotNull
+  public static List<FlutterApp> allFromProjectProcess(@NotNull Project project) {
+    final List<FlutterApp> allRunningApps = new ArrayList<>();
+    final List<RunContentDescriptor> runningProcesses =
+      ExecutionManager.getInstance(project).getContentManager().getAllDescriptors();
+    for (RunContentDescriptor descriptor : runningProcesses) {
+      final ProcessHandler process = descriptor.getProcessHandler();
+      if (process != null) {
+        final FlutterApp app = FlutterApp.fromProcess(process);
+        if (app != null) {
+          allRunningApps.add(app);
+        }
+      }
+    }
+
+    return allRunningApps;
+  }
+
   /**
    * Creates a process that will launch the flutter app.
    * <p>
@@ -219,7 +241,7 @@ public class FlutterApp {
                                  @NotNull Project project,
                                  @Nullable Module module,
                                  @NotNull RunMode mode,
-                                 @NotNull FlutterDevice device,
+                                 @Nullable FlutterDevice device,
                                  @NotNull GeneralCommandLine command,
                                  @Nullable String analyticsStart,
                                  @Nullable String analyticsStop)
@@ -281,6 +303,19 @@ public class FlutterApp {
   @NotNull
   public ObservatoryConnector getConnector() {
     return myConnector;
+  }
+
+  public void setIsFlutterWeb(boolean value) {
+    isFlutterWeb = value;
+  }
+
+  public boolean getIsFlutterWeb() {
+    return isFlutterWeb;
+  }
+
+  @SuppressWarnings("BooleanMethodIsAlwaysInverted")
+  public boolean appSupportsHotReload() {
+    return !isFlutterWeb;
   }
 
   public State getState() {
@@ -570,12 +605,14 @@ public class FlutterApp {
            !debugProcess.getSession().isStopped();
   }
 
+  @Nullable
   public FlutterDevice device() {
     return myDevice;
   }
 
+  @Nullable
   public String deviceId() {
-    return myDevice.deviceId();
+    return myDevice != null ? myDevice.deviceId() : null;
   }
 
   public void setFlutterDebugProcess(FlutterDebugProcess flutterDebugProcess) {
@@ -697,7 +734,10 @@ class FlutterAppDaemonEventListener implements DaemonEvent.Listener {
     // Shutdown must be sync so that we prevent the processTerminated() event from being delivered
     // until a graceful shutdown has been tried.
     try {
-      app.shutdownAsync().get();
+      app.shutdownAsync().get(100, TimeUnit.MILLISECONDS);
+    }
+    catch (TimeoutException e) {
+      LOG.info("app shutdown took longer than 100ms");
     }
     catch (Exception e) {
       FlutterUtils.warn(LOG, "exception while shutting down Flutter App", e);
@@ -713,7 +753,16 @@ class FlutterAppDaemonEventListener implements DaemonEvent.Listener {
   // daemon domain
 
   @Override
-  public void onDaemonLogMessage(@NotNull DaemonEvent.LogMessage message) {
+  public void onDaemonLog(@NotNull DaemonEvent.DaemonLog message) {
+    final ConsoleView console = app.getConsole();
+    if (console == null) return;
+    if (message.log != null) {
+      console.print(message.log + "\n", message.error ? ConsoleViewContentType.ERROR_OUTPUT : ConsoleViewContentType.NORMAL_OUTPUT);
+    }
+  }
+
+  @Override
+  public void onDaemonLogMessage(@NotNull DaemonEvent.DaemonLogMessage message) {
     LOG.info("flutter app: " + message.message);
   }
 

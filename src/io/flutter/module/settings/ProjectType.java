@@ -11,13 +11,15 @@ import com.intellij.ui.SimpleTextAttributes;
 import io.flutter.FlutterBundle;
 import io.flutter.module.FlutterProjectType;
 import io.flutter.samples.FlutterSample;
-import io.flutter.samples.FlutterSampleManager;
+import io.flutter.sdk.FlutterSdk;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.event.ItemEvent;
 import java.awt.event.ItemListener;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
 
@@ -65,11 +67,16 @@ public class ProjectType {
 
   private static final class FlutterSampleComboBoxModel extends AbstractListModel<FlutterSample>
     implements ComboBoxModel<FlutterSample> {
-    private final List<FlutterSample> myList = FlutterSampleManager.getSamples();
+    private final List<FlutterSample> myList;
     private FlutterSample mySelected;
 
     public FlutterSampleComboBoxModel() {
-      mySelected = myList.get(0);
+      this(null);
+    }
+
+    public FlutterSampleComboBoxModel(@Nullable FlutterSdk sdk) {
+      myList = sdk == null ? Collections.emptyList() : sdk.getSamples();
+      mySelected = myList.isEmpty() ? null : myList.get(0);
     }
 
     @Override
@@ -79,7 +86,7 @@ public class ProjectType {
 
     @Override
     public FlutterSample getElementAt(int index) {
-      return myList.get(index);
+      return myList.isEmpty() ? null : myList.get(index);
     }
 
     @Override
@@ -101,19 +108,32 @@ public class ProjectType {
   private class FlutterSampleCellRenderer extends ColoredListCellRenderer<FlutterSample> {
     @Override
     protected void customizeCellRenderer(@NotNull JList<? extends FlutterSample> list,
-                                         FlutterSample sample,
+                                         @Nullable FlutterSample sample,
                                          int index,
                                          boolean selected,
                                          boolean hasFocus) {
-      final SimpleTextAttributes style = snippetSelectorCombo.isEnabled() ? SimpleTextAttributes.REGULAR_ATTRIBUTES : SimpleTextAttributes.GRAY_ATTRIBUTES;
-      append(sample.getDisplayLabel(), style);
+      final SimpleTextAttributes style =
+        snippetSelectorCombo.isEnabled() ? SimpleTextAttributes.REGULAR_ATTRIBUTES : SimpleTextAttributes.GRAY_ATTRIBUTES;
+      append(sample == null ? "" : sample.getDisplayLabel(), style);
     }
   }
+
+  @Nullable
+  private FlutterSdk sdk;
 
   private JPanel projectTypePanel;
   private ComboBox projectTypeCombo;
   private ComboBox<FlutterSample> snippetSelectorCombo;
   private JCheckBox generateSampleContentCheckBox;
+
+  public ProjectType(@Nullable FlutterSdk sdk) {
+    this.sdk = sdk;
+  }
+
+  @SuppressWarnings("unused")
+  public ProjectType() {
+    // Required by AS NPW
+  }
 
   private void createUIComponents() {
     projectTypeCombo = new ComboBox<>();
@@ -130,7 +150,7 @@ public class ProjectType {
     });
 
     snippetSelectorCombo = new ComboBox<>();
-    snippetSelectorCombo.setModel(new FlutterSampleComboBoxModel());
+    snippetSelectorCombo.setModel(new FlutterSampleComboBoxModel(sdk));
     snippetSelectorCombo.setRenderer(new FlutterSampleCellRenderer());
     snippetSelectorCombo.setToolTipText(FlutterBundle.message("flutter.module.create.settings.sample.tip"));
     snippetSelectorCombo.setEnabled(false);
@@ -138,7 +158,6 @@ public class ProjectType {
     generateSampleContentCheckBox = new JCheckBox();
     generateSampleContentCheckBox.setText(FlutterBundle.message("flutter.module.create.settings.sample.text"));
     generateSampleContentCheckBox.addItemListener(e -> snippetSelectorCombo.setEnabled(e.getStateChange() == ItemEvent.SELECTED));
-
   }
 
   @NotNull
@@ -151,11 +170,17 @@ public class ProjectType {
   }
 
   public FlutterSample getSample() {
-    return generateSampleContentCheckBox.isVisible() && generateSampleContentCheckBox.isSelected() ? (FlutterSample)snippetSelectorCombo.getSelectedItem() : null;
+    return generateSampleContentCheckBox.isVisible() && generateSampleContentCheckBox.isSelected() ? (FlutterSample)snippetSelectorCombo
+      .getSelectedItem() : null;
   }
 
   public ComboBox getProjectTypeCombo() {
     return projectTypeCombo;
+  }
+
+  public void setSdk(@NotNull FlutterSdk sdk) {
+    this.sdk = sdk;
+    snippetSelectorCombo.setModel(new FlutterSampleComboBoxModel(sdk));
   }
 
   public void addListener(ItemListener listener) {

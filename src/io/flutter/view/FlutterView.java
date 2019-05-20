@@ -64,8 +64,6 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
-import java.net.MalformedURLException;
-import java.net.URL;
 import java.util.List;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -100,6 +98,8 @@ public class FlutterView implements PersistentStateComponent<FlutterViewState>, 
   protected final EventStream<Boolean> highlightNodesShownInBothTrees =
     new EventStream<>(FlutterViewState.HIGHLIGHT_NODES_SHOWN_IN_BOTH_TREES_DEFAULT);
 
+
+  private boolean previouslyVisible = false;
 
   @NotNull
   private final FlutterViewState state = new FlutterViewState();
@@ -216,12 +216,22 @@ public class FlutterView implements PersistentStateComponent<FlutterViewState>, 
     final SimpleToolWindowPanel toolWindowPanel = new SimpleToolWindowPanel(true);
     final JBRunnerTabs runnerTabs = new JBRunnerTabs(myProject, ActionManager.getInstance(), null, this);
     runnerTabs.setSelectionChangeHandler(this::onTabSelectionChange);
-    final List<FlutterDevice> existingDevices = new ArrayList<>();
-    for (FlutterApp otherApp : perAppViewState.keySet()) {
-      existingDevices.add(otherApp.device());
-    }
     final JPanel tabContainer = new JPanel(new BorderLayout());
-    final Content content = contentManager.getFactory().createContent(null, app.device().getUniqueName(existingDevices), false);
+
+    final String tabName;
+    final FlutterDevice device = app.device();
+    if (device == null) {
+      tabName = app.getProject().getName();
+    }
+    else {
+      final List<FlutterDevice> existingDevices = new ArrayList<>();
+      for (FlutterApp otherApp : perAppViewState.keySet()) {
+        existingDevices.add(otherApp.device());
+      }
+      tabName = device.getUniqueName(existingDevices);
+    }
+
+    final Content content = contentManager.getFactory().createContent(null, tabName, false);
     tabContainer.add(runnerTabs.getComponent(), BorderLayout.CENTER);
     content.setComponent(tabContainer);
     content.putUserData(ToolWindow.SHOW_CONTENT_ICON, Boolean.TRUE);
@@ -370,12 +380,7 @@ public class FlutterView implements PersistentStateComponent<FlutterViewState>, 
     final ToolWindowManagerEx toolWindowManager = ToolWindowManagerEx.getInstanceEx(myProject);
     final ToolWindow flutterPerfToolWindow = toolWindowManager.getToolWindow(FlutterPerfView.TOOL_WINDOW_ID);
     final FlutterPerfView flutterPerfView = ServiceManager.getService(myProject, FlutterPerfView.class);
-    final InspectorPerfTab inspectorPerfTab = flutterPerfView.showPerfTab(app);
-    if (flutterPerfToolWindow.isVisible()) {
-      inspectorPerfTab.setVisibleToUser(true);
-      return;
-    }
-    flutterPerfToolWindow.show(() -> inspectorPerfTab.setVisibleToUser(true));
+    flutterPerfToolWindow.show(() -> flutterPerfView.showForApp(app));
   }
 
   /**
@@ -395,16 +400,13 @@ public class FlutterView implements PersistentStateComponent<FlutterViewState>, 
             FlutterUtils.warn(LOG, throwable);
             return;
           }
+
           debugActiveHelper(app, inspectorService);
         });
     }
   }
 
   private void debugActiveHelper(FlutterApp app, @Nullable InspectorService inspectorService) {
-    if (FlutterSettings.getInstance().isOpenInspectorOnAppLaunch()) {
-      activateToolWindow();
-    }
-
     final ToolWindowManager toolWindowManager = ToolWindowManager.getInstance(myProject);
     if (!(toolWindowManager instanceof ToolWindowManagerEx)) {
       return;
@@ -413,6 +415,15 @@ public class FlutterView implements PersistentStateComponent<FlutterViewState>, 
     final ToolWindow toolWindow = toolWindowManager.getToolWindow(FlutterView.TOOL_WINDOW_ID);
     if (toolWindow == null) {
       return;
+    }
+
+    if (toolWindow.isAvailable()) {
+      updateToolWindowVisibility(toolWindow);
+    }
+    else {
+      toolWindow.setAvailable(true, () -> {
+        updateToolWindowVisibility(toolWindow);
+      });
     }
 
     if (emptyContent != null) {
@@ -455,6 +466,12 @@ public class FlutterView implements PersistentStateComponent<FlutterViewState>, 
           if (perAppViewState.isEmpty()) {
             // No more applications are running.
             updateForEmptyContent(toolWindow);
+            if (toolWindow.isAvailable()) {
+              // Store whether the tool window was visible before we decided to close it
+              // because it had no content.
+              previouslyVisible = toolWindow.isVisible();
+              toolWindow.setAvailable(false, null);
+            }
           }
         });
       }
@@ -576,21 +593,14 @@ public class FlutterView implements PersistentStateComponent<FlutterViewState>, 
     }
   }
 
-  /**
-   * Activate the tool window.
-   */
-  private void activateToolWindow() {
-    final ToolWindowManager toolWindowManager = ToolWindowManager.getInstance(myProject);
-    if (!(toolWindowManager instanceof ToolWindowManagerEx)) {
-      return;
-    }
-
-    final ToolWindow flutterToolWindow = toolWindowManager.getToolWindow(FlutterView.TOOL_WINDOW_ID);
+  private void updateToolWindowVisibility(ToolWindow flutterToolWindow) {
     if (flutterToolWindow.isVisible()) {
       return;
     }
 
-    flutterToolWindow.show(null);
+    if (FlutterSettings.getInstance().isOpenInspectorOnAppLaunch() || previouslyVisible) {
+      flutterToolWindow.show(null);
+    }
   }
 }
 
@@ -607,24 +617,14 @@ class FlutterViewDevToolsAction extends FlutterViewAction {
         return;
       }
 
-      final URL url;
-      try {
-        url = new URL(urlString);
-      }
-      catch (MalformedURLException e) {
-        return;
-      }
-
-      final int port = url.getPort();
-
       final DevToolsManager devToolsManager = DevToolsManager.getInstance(app.getProject());
 
       if (devToolsManager.hasInstalledDevTools()) {
-        devToolsManager.openBrowserAndConnect(port);
+        devToolsManager.openBrowserAndConnect(urlString);
       }
       else {
         final CompletableFuture<Boolean> result = devToolsManager.installDevTools();
-        result.thenAccept(o -> devToolsManager.openBrowserAndConnect(port));
+        result.thenAccept(o -> devToolsManager.openBrowserAndConnect(urlString));
       }
     }
   }

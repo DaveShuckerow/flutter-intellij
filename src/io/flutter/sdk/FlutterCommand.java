@@ -37,16 +37,16 @@ public class FlutterCommand {
     Arrays.asList(Type.PACKAGES_GET, Type.PACKAGES_UPGRADE, Type.UPGRADE));
 
   @NotNull
-  private final FlutterSdk sdk;
+  protected final FlutterSdk sdk;
 
   @Nullable
-  private final VirtualFile workDir;
+  protected final VirtualFile workDir;
 
   @NotNull
   private final Type type;
 
   @NotNull
-  private final List<String> args;
+  protected final List<String> args;
 
   /**
    * @see FlutterSdk for methods to create specific commands.
@@ -245,14 +245,11 @@ public class FlutterCommand {
   public GeneralCommandLine createGeneralCommandLine(@Nullable Project project) {
     final GeneralCommandLine line = new GeneralCommandLine();
     line.setCharset(CharsetToolkit.UTF8_CHARSET);
-
     line.withEnvironment(FlutterSdkUtil.FLUTTER_HOST_ENV, FlutterSdkUtil.getFlutterHostEnvValue());
-
     final String androidHome = IntelliJAndroidSdk.chooseAndroidHome(project, false);
     if (androidHome != null) {
       line.withEnvironment("ANDROID_HOME", androidHome);
     }
-
     line.setExePath(FileUtil.toSystemDependentName(sdk.getHomePath() + "/bin/" + FlutterSdkUtil.flutterScriptName()));
     if (workDir != null) {
       line.setWorkDirectory(workDir.getPath());
@@ -276,11 +273,13 @@ public class FlutterCommand {
     CONFIG("Flutter config", "config"),
     CREATE("Flutter create", "create"),
     DOCTOR("Flutter doctor", "doctor", "--verbose"),
+    LIST_SAMPLES("Flutter create --lists-samples", "create", "--list-samples"),
     MAKE_HOST_APP_EDITABLE("Flutter make-host-app-editable", "make-host-app-editable"),
     PACKAGES_GET("Flutter packages get", "packages", "get"),
     PACKAGES_UPGRADE("Flutter packages upgrade", "packages", "upgrade"),
     PACKAGES_PUB("Flutter packages pub", "packages", "pub"),
     RUN("Flutter run", "run"),
+    FLUTTER_WEB_RUN("Flutter Web run", "flutter_web_run"),
     UPGRADE("Flutter upgrade", "upgrade"),
     VERSION("Flutter version", "--version"),
     TEST("Flutter test", "test");

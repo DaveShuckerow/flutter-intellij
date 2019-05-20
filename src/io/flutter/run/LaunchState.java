@@ -45,6 +45,7 @@ import io.flutter.actions.RestartFlutterApp;
 import io.flutter.dart.DartPlugin;
 import io.flutter.logging.FlutterLog;
 import io.flutter.logging.FlutterLogView;
+import io.flutter.pub.PubRoot;
 import io.flutter.run.bazel.BazelRunConfig;
 import io.flutter.run.daemon.*;
 import org.jetbrains.annotations.NotNull;
@@ -118,13 +119,21 @@ public class LaunchState extends CommandLineState {
     }
 
     final Project project = getEnvironment().getProject();
-    final FlutterDevice device = DeviceService.getInstance(project).getSelectedDevice();
-
-    if (device == null) {
+    @Nullable FlutterDevice device = DeviceService.getInstance(project).getSelectedDevice();
+    final boolean isFlutterWeb = isFlutterWeb(project);
+    // Flutter web does not yet support devices.
+    if (isFlutterWeb) {
+      device = null;
+    }
+    else if (device == null) {
       showNoDeviceConnectedMessage(project);
       return null;
     }
+
     final FlutterApp app = myCreateAppCallback.createApp(device);
+    if (isFlutterWeb) {
+      app.setIsFlutterWeb(true);
+    }
 
     // Cache for use in console configuration.
     FlutterApp.addToEnvironment(env, app);
@@ -134,10 +143,8 @@ public class LaunchState extends CommandLineState {
 
     final ExecutionResult result = setUpConsoleAndActions(app);
 
-    // For Bazel run configurations,
-    // where the console is not null,
-    // and we find the expected process handler type,
-    // print the command line command to the console.
+    // For Bazel run configurations, where the console is not null, and we find the expected
+    // process handler type, print the command line command to the console.
     if (runConfig instanceof BazelRunConfig &&
         app.getConsole() != null &&
         app.getProcessHandler() instanceof OSProcessHandler) {
@@ -147,7 +154,9 @@ public class LaunchState extends CommandLineState {
       }
     }
 
-    device.bringToFront();
+    if (device != null) {
+      device.bringToFront();
+    }
 
     // Check for and display any analysis errors when we launch an app.
     if (env.getRunProfile() instanceof SdkRunConfig) {
@@ -170,6 +179,26 @@ public class LaunchState extends CommandLineState {
     else {
       return new RunContentBuilder(result, env).showRunContent(env.getContentToReuse());
     }
+  }
+
+  private boolean isFlutterWeb(Project project) {
+    boolean isFlutterWeb = false;
+
+    // Checks if this is a pub-based project.
+    // TODO(djshuckerow): Refactor out pub-specific logic and provide bazel support.
+    if (SdkRunConfig.class.isAssignableFrom(runConfig.getClass())) {
+
+      final String filePath = ((SdkRunConfig)runConfig).getFields().getFilePath();
+
+      if (filePath != null) {
+        final MainFile main = MainFile.verify(filePath, project).get();
+        final PubRoot root = PubRoot.forDirectory(main.getAppDir());
+        if (root != null) {
+          isFlutterWeb = FlutterUtils.declaresFlutterWeb(root.getPubspec());
+        }
+      }
+    }
+    return isFlutterWeb;
   }
 
   private static Class classForName(String className) {
@@ -379,31 +408,35 @@ public class LaunchState extends CommandLineState {
         final FlutterApp app = FlutterApp.fromProcess(process);
         final String selectedDeviceId = getSelectedDeviceId(env.getProject());
 
-        if (app != null && StringUtil.equals(app.deviceId(), selectedDeviceId)) {
-          if (executorId.equals(app.getMode().mode())) {
-            if (!identicalCommands(app.getCommand(), launchState.runConfig.getCommand(env, app.device()))) {
-              // To be safe, relaunch as the arguments to launch have changed.
-              try {
-                // TODO(jacobr): ideally we shouldn't be synchronously waiting for futures like this
-                // but I don't see a better option. In practice this seems fine.
-                app.shutdownAsync().get();
+        if (app != null) {
+          final boolean sameDevice = app.getIsFlutterWeb() || StringUtil.equals(app.deviceId(), selectedDeviceId);
+
+          if (sameDevice) {
+            if (executorId.equals(app.getMode().mode())) {
+              if (!identicalCommands(app.getCommand(), launchState.runConfig.getCommand(env, app.device()))) {
+                // To be safe, relaunch as the arguments to launch have changed.
+                try {
+                  // TODO(jacobr): ideally we shouldn't be synchronously waiting for futures like this
+                  // but I don't see a better option. In practice this seems fine.
+                  app.shutdownAsync().get();
+                }
+                catch (InterruptedException | java.util.concurrent.ExecutionException e) {
+                  FlutterUtils.warn(LOG, e);
+                }
+                return launchState.launch(env);
               }
-              catch (InterruptedException | java.util.concurrent.ExecutionException e) {
-                FlutterUtils.warn(LOG, e);
+
+              final FlutterLaunchMode launchMode = FlutterLaunchMode.fromEnv(env);
+              if (launchMode.supportsReload() && app.isStarted()) {
+                // Map a re-run action to a flutter hot restart.
+                FileDocumentManager.getInstance().saveAllDocuments();
+                FlutterInitializer.sendAnalyticsAction(RestartFlutterApp.class.getSimpleName());
+                app.performRestartApp(FlutterConstants.RELOAD_REASON_SAVE);
               }
-              return launchState.launch(env);
             }
 
-            final FlutterLaunchMode launchMode = FlutterLaunchMode.fromEnv(env);
-            if (launchMode.supportsReload() && app.isStarted()) {
-              // Map a re-run action to a flutter hot restart.
-              FileDocumentManager.getInstance().saveAllDocuments();
-              FlutterInitializer.sendAnalyticsAction(RestartFlutterApp.class.getSimpleName());
-              app.performRestartApp(FlutterConstants.RELOAD_REASON_SAVE);
-            }
+            return null;
           }
-
-          return null;
         }
       }
 

@@ -33,12 +33,12 @@ public class DaemonEventTest {
       // daemon domain
 
       @Override
-      public void onDaemonLogMessage(DaemonEvent.LogMessage event) {
+      public void onDaemonLogMessage(DaemonEvent.DaemonLogMessage event) {
         logEvent(event, event.level, event.message, event.stackTrace);
       }
 
       @Override
-      public void onDaemonShowMessage(DaemonEvent.ShowMessage event) {
+      public void onDaemonShowMessage(DaemonEvent.DaemonShowMessage event) {
         logEvent(event, event.level, event.title, event.message);
       }
 
@@ -109,13 +109,13 @@ public class DaemonEventTest {
   @Test
   public void canReceiveLogMessage() {
     send("daemon.logMessage", curly("level:\"spam\"", "message:\"Make money fast\"", "stackTrace:\"Las Vegas\""));
-    checkLog("LogMessage: spam, Make money fast, Las Vegas");
+    checkLog("DaemonLogMessage: spam, Make money fast, Las Vegas");
   }
 
   @Test
   public void canReceiveShowMessage() {
     send("daemon.showMessage", curly("level:\"info\"", "title:\"Spam\"", "message:\"Make money fast\""));
-    checkLog("ShowMessage: info, Spam, Make money fast");
+    checkLog("DaemonShowMessage: info, Spam, Make money fast");
   }
 
   // app domain
@@ -123,7 +123,7 @@ public class DaemonEventTest {
   @Test
   public void canReceiveAppStarting() {
     send("app.start", curly("appId:42", "deviceId:456", "directory:somedir", "launchMode:run"));
-    checkLog("AppStarting: 42, 456, somedir", "run");
+    checkLog("AppStarting: 42, 456, somedir, run");
   }
 
   @Test

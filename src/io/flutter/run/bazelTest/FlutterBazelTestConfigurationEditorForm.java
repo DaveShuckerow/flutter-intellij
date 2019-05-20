@@ -43,20 +43,17 @@ public class FlutterBazelTestConfigurationEditorForm extends SettingsEditor<Baze
   private JLabel myTestNameLabel;
   private JLabel myTestNameHintLabel;
 
+  private JTextField myAdditionalArgs;
+  private JLabel myAdditionalArgsLabel;
+  private JLabel myAdditionalArgsLabelHint;
+
   private Scope displayedScope;
 
-  private boolean useNewBazelTestRunner;
-
   public FlutterBazelTestConfigurationEditorForm(final Project project) {
-    useNewBazelTestRunner = FlutterSettings.getInstance().useNewBazelTestRunner(project);
-    FlutterSettings.getInstance().addListener(new FlutterSettings.Listener() {
-      @Override
-      public void settingsChanged() {
-        useNewBazelTestRunner = FlutterSettings.getInstance().useNewBazelTestRunner(project);
-        final Scope next = getScope();
-        updateFields(next);
-        render(getScope());
-      }
+    FlutterSettings.getInstance().addListener(() -> {
+      final Scope next = getScope();
+      updateFields(next);
+      render(getScope());
     });
     scope.setModel(new DefaultComboBoxModel<>(new Scope[]{TARGET_PATTERN, FILE, NAME}));
     scope.addActionListener((ActionEvent e) -> {
@@ -74,9 +71,7 @@ public class FlutterBazelTestConfigurationEditorForm extends SettingsEditor<Baze
         setText(value.getDisplayName());
       }
     });
-    // Only enable scope changes if the new bazel test runner is enabled.
-    // If the new runner is disabled, all scopes will be blaze target-level.
-    scope.setEnabled(useNewBazelTestRunner);
+    scope.setEnabled(true);
 
     final FileChooserDescriptor descriptor = FileChooserDescriptorFactory.createSingleFileDescriptor();
 
@@ -89,6 +84,7 @@ public class FlutterBazelTestConfigurationEditorForm extends SettingsEditor<Baze
     myTestName.setText(fields.getTestName());
     myEntryFile.setText(FileUtil.toSystemDependentName(StringUtil.notNullize(fields.getEntryFile())));
     myBuildTarget.setText(StringUtil.notNullize(fields.getBazelTarget()));
+    myAdditionalArgs.setText(StringUtil.notNullize(fields.getAdditionalArgs()));
     final Scope next = fields.getScope(configuration.getProject());
     scope.setSelectedItem(next);
     render(next);
@@ -99,10 +95,12 @@ public class FlutterBazelTestConfigurationEditorForm extends SettingsEditor<Baze
     final String testName = getTextValue(myTestName);
     final String entryFile = getFilePathFromTextValue(myEntryFile);
     final String bazelTarget = getTextValue(myBuildTarget);
+    final String additionalArgs = getTextValue(myAdditionalArgs);
     final BazelTestFields fields = new BazelTestFields(
       testName,
       entryFile,
-      bazelTarget
+      bazelTarget,
+      additionalArgs
     );
     configuration.setFields(fields);
   }
@@ -119,6 +117,7 @@ public class FlutterBazelTestConfigurationEditorForm extends SettingsEditor<Baze
    * a suitable default.
    */
   private void updateFields(Scope next) {
+    // TODO(devoncarew): This if path is empty - due to a refactoring?
     if (next == Scope.TARGET_PATTERN && displayedScope != Scope.TARGET_PATTERN) {
     }
     else if (next != Scope.TARGET_PATTERN) {
@@ -142,50 +141,34 @@ public class FlutterBazelTestConfigurationEditorForm extends SettingsEditor<Baze
    */
   private void render(Scope next) {
 
-    if (useNewBazelTestRunner) {
-      scope.setVisible(true);
-      scopeLabel.setVisible(true);
-      scopeLabelHint.setVisible(true);
+    scope.setVisible(true);
+    scopeLabel.setVisible(true);
+    scopeLabelHint.setVisible(true);
 
-      myTestName.setVisible(next == Scope.NAME);
-      myTestNameLabel.setVisible(next == Scope.NAME);
-      myTestNameHintLabel.setVisible(next == Scope.NAME);
+    myAdditionalArgs.setVisible(true);
+    myAdditionalArgsLabel.setVisible(true);
+    myAdditionalArgsLabel.setVisible(true);
 
-      myEntryFile.setVisible(next == Scope.FILE || next == Scope.NAME);
-      myEntryFileLabel.setVisible(next == Scope.FILE || next == Scope.NAME);
-      myEntryFileHintLabel.setVisible(next == Scope.FILE || next == Scope.NAME);
+    myTestName.setVisible(next == Scope.NAME);
+    myTestNameLabel.setVisible(next == Scope.NAME);
+    myTestNameHintLabel.setVisible(next == Scope.NAME);
 
-      myBuildTarget.setVisible(next == Scope.TARGET_PATTERN);
-      myBuildTargetLabel.setVisible(next == Scope.TARGET_PATTERN);
-      myBuildTargetHintLabel.setVisible(next == Scope.TARGET_PATTERN);
+    myEntryFile.setVisible(next == Scope.FILE || next == Scope.NAME);
+    myEntryFileLabel.setVisible(next == Scope.FILE || next == Scope.NAME);
+    myEntryFileHintLabel.setVisible(next == Scope.FILE || next == Scope.NAME);
 
-      // Because the scope of the underlying fields is calculated based on which parameters are assigned,
-      // we remove fields that aren't part of the selected scope.
-      if (next.equals(Scope.TARGET_PATTERN)) {
-        myTestName.setText("");
-        myEntryFile.setText("");
-      }
-      else if (next.equals(Scope.FILE)) {
-        myTestName.setText("");
-      }
-    } else {
-      // If the new bazel test runner is disabled, then all scopes are build target-level.
-      // We'll preserve the legacy appearance of the form.
-      scope.setVisible(false);
-      scopeLabel.setVisible(false);
-      scopeLabelHint.setVisible(false);
+    myBuildTarget.setVisible(next == Scope.TARGET_PATTERN);
+    myBuildTargetLabel.setVisible(next == Scope.TARGET_PATTERN);
+    myBuildTargetHintLabel.setVisible(next == Scope.TARGET_PATTERN);
 
-      myTestName.setVisible(false);
-      myTestNameLabel.setVisible(false);
-      myTestNameHintLabel.setVisible(false);
-
-      myEntryFile.setVisible(true);
-      myEntryFileLabel.setVisible(true);
-      myEntryFileHintLabel.setVisible(true);
-
-      myBuildTarget.setVisible(true);
-      myBuildTargetLabel.setVisible(true);
-      myBuildTargetHintLabel.setVisible(true);
+    // Because the scope of the underlying fields is calculated based on which parameters are assigned,
+    // we remove fields that aren't part of the selected scope.
+    if (next.equals(Scope.TARGET_PATTERN)) {
+      myTestName.setText("");
+      myEntryFile.setText("");
+    }
+    else if (next.equals(Scope.FILE)) {
+      myTestName.setText("");
     }
 
     displayedScope = next;

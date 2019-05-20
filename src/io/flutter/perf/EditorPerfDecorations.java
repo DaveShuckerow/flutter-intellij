@@ -27,7 +27,6 @@ import com.intellij.xdebugger.XSourcePosition;
 import io.flutter.run.daemon.FlutterApp;
 import io.flutter.utils.AsyncUtils;
 import io.flutter.view.FlutterPerfView;
-import io.flutter.view.InspectorPerfTab;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -49,7 +48,7 @@ class EditorPerfDecorations implements EditorMouseListener, EditorPerfModel {
 
   /**
    * Experimental option to animate highlighted widget names.
-   *
+   * <p>
    * Disabled by default as animating contents of the TextEditor results in
    * higher than desired memory usage.
    */
@@ -342,7 +341,7 @@ class PerfGutterIconRenderer extends GutterIconRenderer {
   public AnAction getClickAction() {
     return new AnAction() {
       @Override
-      public void actionPerformed(AnActionEvent e) {
+      public void actionPerformed(@NotNull AnActionEvent event) {
         if (isActive()) {
 
           final ToolWindowManagerEx toolWindowManager = ToolWindowManagerEx.getInstanceEx(getApp().getProject());
@@ -359,7 +358,7 @@ class PerfGutterIconRenderer extends GutterIconRenderer {
 
   private void showPerfViewMessage() {
     final FlutterPerfView flutterPerfView = ServiceManager.getService(getApp().getProject(), FlutterPerfView.class);
-    final InspectorPerfTab inspectorPerfTab = flutterPerfView.showPerfTab(getApp());
+    flutterPerfView.showForAppRebuildCounts(getApp());
     String message = "<html><body>" +
                      getTooltipHtmlFragment() +
                      "</body></html>";

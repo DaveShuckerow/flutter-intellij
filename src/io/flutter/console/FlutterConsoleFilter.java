@@ -76,9 +76,14 @@ public class FlutterConsoleFilter implements Filter {
   @VisibleForTesting
   @Nullable
   public VirtualFile fileAtPath(@NotNull String pathPart) {
-
     // "lib/main.dart:6"
     pathPart = pathPart.split(":")[0];
+
+    // We require the pathPart reference to be a file reference, otherwise we'd match things like
+    // "Build: Running build completed, took 191ms".
+    if (pathPart.indexOf('.') == -1) {
+      return null;
+    }
 
     final VirtualFile[] roots = ModuleRootManager.getInstance(module).getContentRoots();
     for (VirtualFile root : roots) {
@@ -189,7 +194,7 @@ public class FlutterConsoleFilter implements Filter {
         return;
       }
 
-      final FlutterApp app = FlutterApp.fromProjectProcess(project);
+      final FlutterApp app = FlutterApp.firstFromProjectProcess(project);
       if (app == null) {
         Messages.showErrorDialog(project, "Running Flutter App not found", "Error");
         return;

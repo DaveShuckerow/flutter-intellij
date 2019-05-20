@@ -25,6 +25,7 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
+import com.intellij.testFramework.LightVirtualFile;
 import com.intellij.util.PlatformUtils;
 import com.jetbrains.lang.dart.DartFileType;
 import com.jetbrains.lang.dart.psi.DartFile;
@@ -66,6 +67,16 @@ public class FlutterUtils {
 
   public static boolean isFlutteryFile(@NotNull VirtualFile file) {
     return isDartFile(file) || PubRoot.isPubspec(file);
+  }
+
+  public static boolean couldContainWidgets(@Nullable VirtualFile file) {
+    // Skip temp file used to show things like files downloaded from the VM.
+    if (file instanceof LightVirtualFile) {
+      return false;
+    }
+    // TODO(jacobr): we might also want to filter for files not under the
+    // current project root.
+    return file != null && FlutterUtils.isDartFile(file);
   }
 
   public static boolean isDartFile(@NotNull VirtualFile file) {
@@ -148,6 +159,10 @@ public class FlutterUtils {
 
     final String relativePath = root.getRelativePath(candidate);
     return relativePath != null && (relativePath.startsWith("test/"));
+  }
+
+  public static boolean isIntegrationTestingMode() {
+    return System.getProperty("idea.required.plugins.id", "").equals("io.flutter.tests.gui.flutter-gui-tests");
   }
 
   @Nullable
@@ -253,11 +268,46 @@ public class FlutterUtils {
 
   @NotNull
   public static PluginId getPluginId() {
-    // TODO(devoncarew): Update this as we converge on a new build system.
-    //final PluginId pluginId = PluginId.findId(isAndroidStudio() ? "io.flutter.as" : "io.flutter");
     final PluginId pluginId = PluginId.findId("io.flutter");
     assert pluginId != null;
     return pluginId;
+  }
+
+  /**
+   * Returns true if passed pubspec declares a flutter or flutter_web dependency.
+   * <p>
+   * This method is provided explicitly instead of calling declaresFlutter(VirtualFile) || declaresFlutterWeb(VirtualFile) so only one read
+   * and parsing of the pubspec is made.
+   */
+  public static boolean declaresFlutterAny(@NotNull final VirtualFile pubspec) {
+    // It uses Flutter if it contains:
+    // dependencies:
+    //   flutter:
+
+    try {
+      final Map<String, Object> yamlMap = readPubspecFileToMap(pubspec);
+      if (yamlMap == null) {
+        return false;
+      }
+
+      // Special case the 'flutter' package itself - this allows us to run their unit tests from IntelliJ.
+      final Object name = yamlMap.get("name");
+      if ("flutter".equals(name)) {
+        return true;
+      }
+
+      // Check for a dependency on the flutter package.
+      final Object dependencies = yamlMap.get("dependencies");
+      //noinspection SimplifiableIfStatement
+      if (dependencies instanceof Map) {
+        return ((Map)dependencies).containsKey("flutter") || ((Map)dependencies).containsKey("flutter_web");
+      }
+
+      return false;
+    }
+    catch (IOException e) {
+      return false;
+    }
   }
 
   /**
@@ -269,23 +319,50 @@ public class FlutterUtils {
     //   flutter:
 
     try {
-      final String contents = new String(pubspec.contentsToByteArray(true /* cache contents */));
-      final Map<String, Object> yaml = loadPubspecInfo(contents);
-      if (yaml == null) {
+      final Map<String, Object> yamlMap = readPubspecFileToMap(pubspec);
+      if (yamlMap == null) {
         return false;
       }
 
       // Special case the 'flutter' package itself - this allows us to run their unit tests from IntelliJ.
-      final Object name = yaml.get("name");
+      final Object name = yamlMap.get("name");
       if ("flutter".equals(name)) {
         return true;
       }
 
       // Check for a dependency on the flutter package.
-      final Object dependencies = yaml.get("dependencies");
+      final Object dependencies = yamlMap.get("dependencies");
       //noinspection SimplifiableIfStatement
       if (dependencies instanceof Map) {
         return ((Map)dependencies).containsKey("flutter");
+      }
+
+      return false;
+    }
+    catch (IOException e) {
+      return false;
+    }
+  }
+
+  /**
+   * Returns true if passed pubspec declares a flutter_web dependency.
+   */
+  public static boolean declaresFlutterWeb(@NotNull final VirtualFile pubspec) {
+    // It uses Flutter if it contains:
+    // dependencies:
+    //   flutter_web:
+
+    try {
+      final Map<String, Object> yamlMap = readPubspecFileToMap(pubspec);
+      if (yamlMap == null) {
+        return false;
+      }
+
+      // Check for a dependency on the flutter package.
+      final Object dependencies = yamlMap.get("dependencies");
+      //noinspection SimplifiableIfStatement
+      if (dependencies instanceof Map) {
+        return ((Map)dependencies).containsKey("flutter_web");
       }
 
       return false;
@@ -304,13 +381,12 @@ public class FlutterUtils {
     //   plugin:
 
     try {
-      final String contents = new String(pubspec.contentsToByteArray(true /* cache contents */));
-      final Map<String, Object> yaml = loadPubspecInfo(contents);
-      if (yaml == null) {
+      final Map<String, Object> yamlMap = readPubspecFileToMap(pubspec);
+      if (yamlMap == null) {
         return false;
       }
 
-      final Object flutterEntry = yaml.get("flutter");
+      final Object flutterEntry = yamlMap.get("flutter");
       //noinspection SimplifiableIfStatement
       if (flutterEntry instanceof Map) {
         return ((Map)flutterEntry).containsKey("plugin");
@@ -337,6 +413,11 @@ public class FlutterUtils {
       }
     }
     return null;
+  }
+
+  private static Map<String, Object> readPubspecFileToMap(@NotNull final VirtualFile pubspec) throws IOException {
+    final String contents = new String(pubspec.contentsToByteArray(true /* cache contents */));
+    return loadPubspecInfo(contents);
   }
 
   private static Map<String, Object> loadPubspecInfo(@NotNull String yamlContents) {

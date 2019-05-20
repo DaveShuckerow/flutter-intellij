@@ -5,8 +5,8 @@
  */
 package io.flutter.run.bazelTest;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.intellij.execution.ExecutionException;
+import com.intellij.execution.configurations.CommandLineTokenizer;
 import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.configurations.RuntimeConfigurationError;
 import com.intellij.execution.process.OSProcessHandler;
@@ -27,7 +27,6 @@ import io.flutter.dart.DartPlugin;
 import io.flutter.run.MainFile;
 import io.flutter.run.daemon.RunMode;
 import io.flutter.sdk.FlutterSettingsConfigurable;
-import io.flutter.settings.FlutterSettings;
 import io.flutter.utils.ElementIO;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
@@ -39,54 +38,34 @@ import java.util.Map;
  * The fields in a Bazel test run configuration.
  */
 public class BazelTestFields {
-
   @Nullable private final String testName;
   @Nullable private final String entryFile;
   @Nullable private final String bazelTarget;
+  @Nullable private final String additionalArgs;
 
-  BazelTestFields(@Nullable String testName, @Nullable String entryFile, @Nullable String bazelTarget) {
+  BazelTestFields(@Nullable String testName, @Nullable String entryFile, @Nullable String bazelTarget, @Nullable String additionalArgs) {
     if (testName != null && entryFile == null) {
       throw new IllegalArgumentException("testName must be specified with an entryFile");
     }
     this.testName = testName;
     this.entryFile = entryFile;
     this.bazelTarget = bazelTarget;
+    this.additionalArgs = additionalArgs;
   }
 
   /**
    * Copy constructor
    */
+  @SuppressWarnings("CopyConstructorMissesField")
   BazelTestFields(@NotNull BazelTestFields template) {
-    this(template.testName, template.entryFile, template.bazelTarget);
+    this(template.testName, template.entryFile, template.bazelTarget, template.additionalArgs);
   }
-
-  /**
-   * Returns whether the new test bazel runner is enabled, and if it's available.
-   */
-  private boolean useNewBazelTestRunner(@NotNull Project project) {
-    if (useNewBazelTestRunnerOverride != null) {
-      return useNewBazelTestRunnerOverride;
-    }
-    // Check that the new test runner is available.
-    final Workspace workspace = getWorkspace(project);
-    final FlutterSettings settings = FlutterSettings.getInstance();
-    return settings != null && settings.useNewBazelTestRunner(project);
-  }
-
-  // The value to use for the bazel test runner setting if no FlutterSettings are available.
-  // TODO(DaveShuckerow): set up a FlutterSettings implementation that we can use in tests.
-  // In the meanwhile, we'll assume that if settings is null, this code is running in a test.
-  // In the tests, we want to cover the new behavior by default, and provide coverage of the old
-  // behavior in cases where the new test script is not available.
-  @VisibleForTesting
-  Boolean useNewBazelTestRunnerOverride = null;
 
   private String getTestScriptFromWorkspace(@NotNull Project project) {
     final Workspace workspace = getWorkspace(project);
     String testScript = workspace.getTestScript();
     // Fall back on the regular launch script if the test script is not available.
-    // Also fall back on the regular launch script if the user has opted out of the new bazel test script.
-    if (testScript == null || !useNewBazelTestRunner(project)) {
+    if (testScript == null) {
       testScript = workspace.getLaunchScript();
     }
     if (testScript != null) {
@@ -100,21 +79,21 @@ public class BazelTestFields {
    */
   @NotNull
   public static BazelTestFields forTestName(@NotNull String testName, @NotNull String path) {
-    return new BazelTestFields(testName, path, null);
+    return new BazelTestFields(testName, path, null, null);
   }
 
   /**
    * Creates settings for running all the tests in a Dart file.
    */
   public static BazelTestFields forFile(@NotNull String path) {
-    return new BazelTestFields(null, path, null);
+    return new BazelTestFields(null, path, null, null);
   }
 
   /**
    * Creates settings for running all the tests in a Bazel target
    */
   public static BazelTestFields forTarget(@NotNull String target) {
-    return new BazelTestFields(null, null, target);
+    return new BazelTestFields(null, null, target, null);
   }
 
 
@@ -144,6 +123,15 @@ public class BazelTestFields {
   @Nullable
   public String getBazelTarget() {
     return bazelTarget;
+  }
+
+
+  /**
+   * Parameters to pass to the test runner, such as --watch.
+   */
+  @Nullable
+  public String getAdditionalArgs() {
+    return additionalArgs;
   }
 
   @NotNull
@@ -209,33 +197,34 @@ public class BazelTestFields {
     final GeneralCommandLine commandLine = new GeneralCommandLine().withWorkDirectory(workspace.getRoot().getPath());
     commandLine.setCharset(CharsetToolkit.UTF8_CHARSET);
     commandLine.setExePath(FileUtil.toSystemDependentName(launchingScript));
-    // If we use the normal bazel launch script, then we want to use only flags for that mode.
-    // This will be invoked if FlutterSettings.useNewBazelTestRunner is false, or if the
-    // new bazel test script is not available.
-    if (useNewBazelTestRunner(project)) {
-      commandLine.addParameter("--no-color");
-      final String relativeEntryFilePath = entryFile == null
-          ? null
-          : FileUtil.getRelativePath(workspace.getRoot().getPath(), entryFile, '/');
-      switch (getScope(project)) {
-        case NAME:
-          commandLine.addParameters("--name", testName);
-          commandLine.addParameter(relativeEntryFilePath);
-          break;
-        case FILE:
-          commandLine.addParameter(relativeEntryFilePath);
-          break;
-        case TARGET_PATTERN:
-          commandLine.addParameter(bazelTarget);
-          break;
-      }
-    } else {
-      // If the new bazel test runner is disabled, we will simply run the bazel target.
-      commandLine.addParameter(bazelTarget);
+
+    // User specified additional target arguments.
+    final CommandLineTokenizer testArgsTokenizer = new CommandLineTokenizer(
+      StringUtil.notNullize(additionalArgs));
+    while (testArgsTokenizer.hasMoreTokens()) {
+      commandLine.addParameter(testArgsTokenizer.nextToken());
     }
 
+    commandLine.addParameter(Flags.noColor);
+    final String relativeEntryFilePath = entryFile == null
+                                         ? null
+                                         : FileUtil.getRelativePath(workspace.getRoot().getPath(), entryFile, '/');
+    switch (getScope(project)) {
+      case NAME:
+        commandLine.addParameters(Flags.name, testName);
+        commandLine.addParameter(relativeEntryFilePath);
+        break;
+      case FILE:
+        commandLine.addParameter(relativeEntryFilePath);
+        break;
+      case TARGET_PATTERN:
+        commandLine.addParameter(bazelTarget);
+        break;
+    }
+
+
     if (mode == RunMode.DEBUG) {
-      commandLine.addParameters("--", "--enable-debugging");
+      commandLine.addParameters(Flags.separator, Flags.enableDebugging);
     }
     return commandLine;
   }
@@ -261,18 +250,14 @@ public class BazelTestFields {
    *
    * <p>
    * <ul>
-   *   <li>Scope.NAME: The testName and entryFile fields are both non-null.  The bazelTarget field may be null.</li>
-   *   <li>Scope.FILE: The entryFile field is non-null.  The bazelTarget field may be null.</li>
-   *   <li>Scope.TARGET_PATTERN: The testName and entryFile fields may both be null.  If the bazelTarget field is non-null, this target is
-   *   runnable.</li>
+   * <li>Scope.NAME: The testName and entryFile fields are both non-null.  The bazelTarget field may be null.</li>
+   * <li>Scope.FILE: The entryFile field is non-null.  The bazelTarget field may be null.</li>
+   * <li>Scope.TARGET_PATTERN: The testName and entryFile fields may both be null.  If the bazelTarget field is non-null, this target is
+   * runnable.</li>
    * </ul>
-   *
    */
   @NotNull
   public Scope getScope(@NotNull Project project) {
-    if (!useNewBazelTestRunner(project)) {
-      return Scope.TARGET_PATTERN;
-    }
     if (testName != null && entryFile != null) {
       return Scope.NAME;
     }
@@ -286,6 +271,7 @@ public class BazelTestFields {
     ElementIO.addOption(element, "testName", testName);
     ElementIO.addOption(element, "entryFile", entryFile);
     ElementIO.addOption(element, "bazelTarget", bazelTarget);
+    ElementIO.addOption(element, "additionalArgs", additionalArgs);
   }
 
   public static BazelTestFields readFrom(Element element) {
@@ -294,10 +280,12 @@ public class BazelTestFields {
     final String testName = options.get("testName");
     final String entryFile = options.get("entryFile");
     final String bazelTarget = options.get("bazelTarget");
+    final String additionalArgs = options.get("additionalArgs");
 
     try {
-      return new BazelTestFields(testName, entryFile, bazelTarget);
-    } catch (IllegalArgumentException e) {
+      return new BazelTestFields(testName, entryFile, bazelTarget, additionalArgs);
+    }
+    catch (IllegalArgumentException e) {
       throw new InvalidDataException(e.getMessage());
     }
   }
@@ -315,13 +303,8 @@ public class BazelTestFields {
       public void checkRunnable(@NotNull BazelTestFields fields, @NotNull Project project) throws RuntimeConfigurationError {
         // The new bazel test runner could not be found.
         final Workspace workspace = fields.getWorkspace(project);
-        if (workspace == null ||  workspace.getTestScript() == null) {
+        if (workspace == null || workspace.getTestScript() == null) {
           throw new RuntimeConfigurationError(FlutterBundle.message("flutter.run.bazel.newBazelTestRunnerUnavailable"),
-                                              () -> FlutterSettingsConfigurable.openFlutterSettings(project));
-        }
-        // The new bazel test runner was not turned on.
-        if (!fields.useNewBazelTestRunner(project)) {
-          throw new RuntimeConfigurationError(FlutterBundle.message("flutter.run.bazel.mustUseNewBazelTestRunner"),
                                               () -> FlutterSettingsConfigurable.openFlutterSettings(project));
         }
 
@@ -354,5 +337,39 @@ public class BazelTestFields {
     }
 
     public abstract void checkRunnable(@NotNull BazelTestFields fields, @NotNull Project project) throws RuntimeConfigurationError;
+  }
+
+  /**
+   * Flags and options that we pass on to the flutter runner or pay special attention to.
+   */
+  final static class Flags {
+    /**
+     * Flag passed to the test runner script.  Tells it to display results without any special text coloring.
+     */
+    static String noColor = "--no-color";
+
+    /**
+     * Option passed to the test runner script.  Tells it to only run tests matching a given name.
+     */
+    static String name = "--name";
+
+    /**
+     * Flag passed to the bazel test runner.  Tells it to allow the debugger to attach to the tests.
+     */
+    static String enableDebugging = "--enable-debugging";
+
+    /**
+     * Separator between groups of flags.  This distinguishes bazel args from additional args.
+     */
+    static String separator = "--";
+
+    /**
+     * Option passed to the bazel test runner.  Tells it to report test status in machine-readable JSON to show results in the UI.
+     */
+    static String machine = "--machine";
+
+    // Don't allow construction of this class.
+    private Flags() {
+    }
   }
 }

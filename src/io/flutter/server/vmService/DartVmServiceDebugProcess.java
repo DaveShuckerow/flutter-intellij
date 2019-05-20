@@ -17,12 +17,8 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Pair;
-import com.intellij.openapi.util.SystemInfo;
-import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.openapi.wm.WindowManager;
 import com.intellij.testFramework.LightVirtualFile;
-import com.intellij.util.BitUtil;
 import com.intellij.util.TimeoutUtil;
 import com.intellij.xdebugger.*;
 import com.intellij.xdebugger.breakpoints.XBreakpointHandler;
@@ -31,7 +27,6 @@ import com.intellij.xdebugger.evaluation.XDebuggerEvaluator;
 import com.intellij.xdebugger.frame.XStackFrame;
 import com.intellij.xdebugger.frame.XSuspendContext;
 import com.jetbrains.lang.dart.ide.runner.DartConsoleFilter;
-import com.jetbrains.lang.dart.ide.runner.ObservatoryConnector;
 import com.jetbrains.lang.dart.ide.runner.actions.DartPopFrameAction;
 import com.jetbrains.lang.dart.ide.runner.base.DartDebuggerEditorsProvider;
 import com.jetbrains.lang.dart.ide.runner.server.OpenDartObservatoryUrlAction;
@@ -40,6 +35,7 @@ import gnu.trove.THashMap;
 import gnu.trove.TIntObjectHashMap;
 import io.flutter.FlutterBundle;
 import io.flutter.FlutterUtils;
+import io.flutter.ObservatoryConnector;
 import io.flutter.run.FlutterLaunchMode;
 import io.flutter.server.vmService.frame.DartVmServiceEvaluator;
 import io.flutter.server.vmService.frame.DartVmServiceStackFrame;
@@ -47,42 +43,30 @@ import io.flutter.server.vmService.frame.DartVmServiceSuspendContext;
 import org.dartlang.vm.service.VmService;
 import org.dartlang.vm.service.consumer.GetObjectConsumer;
 import org.dartlang.vm.service.consumer.VMConsumer;
-import org.dartlang.vm.service.element.Event;
 import org.dartlang.vm.service.element.*;
 import org.dartlang.vm.service.logging.Logging;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
-import java.awt.event.WindowEvent;
-import java.awt.event.WindowListener;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
 public class DartVmServiceDebugProcess extends XDebugProcess {
   private static final Logger LOG = Logger.getInstance(DartVmServiceDebugProcess.class.getName());
 
-  @Nullable private final ExecutionResult myExecutionResult;
+  @NotNull private final ExecutionResult myExecutionResult;
   @NotNull private final DartUrlResolver myDartUrlResolver;
-  @NotNull private final String myDebuggingHost;
-  private final int myObservatoryPort;
   @NotNull private final XBreakpointHandler[] myBreakpointHandlers;
   private final IsolatesInfo myIsolatesInfo;
   @NotNull private final Map<String, CompletableFuture<Object>> mySuspendedIsolateIds = Collections.synchronizedMap(new HashMap<>());
   private final Map<String, LightVirtualFile> myScriptIdToContentMap = new THashMap<>();
-  private final Map<String, TIntObjectHashMap<Pair<Integer, Integer>>> myScriptIdToLinesAndColumnsMap =
-    new THashMap<>();
-  private final int myTimeout;
+  private final Map<String, TIntObjectHashMap<Pair<Integer, Integer>>> myScriptIdToLinesAndColumnsMap = new THashMap<>();
   @Nullable private final VirtualFile myCurrentWorkingDirectory;
   @NotNull private final ObservatoryConnector myConnector;
-  @NotNull
-  private final ExecutionEnvironment executionEnvironment;
-  @NotNull
-  private final PositionMapper mapper;
+  @NotNull private final ExecutionEnvironment executionEnvironment;
+  @NotNull private final PositionMapper mapper;
   @Nullable protected String myRemoteProjectRootUri;
   private boolean myVmConnected = false;
   @NotNull private final OpenDartObservatoryUrlAction myOpenObservatoryAction =
@@ -99,11 +83,8 @@ public class DartVmServiceDebugProcess extends XDebugProcess {
                                    @NotNull final PositionMapper mapper) {
     super(session);
 
-    myDebuggingHost = "localhost";
-    myObservatoryPort = 0;
     myExecutionResult = executionResult;
     myDartUrlResolver = dartUrlResolver;
-    myTimeout = 0;
     myCurrentWorkingDirectory = null;
 
     myIsolatesInfo = new IsolatesInfo();
@@ -117,8 +98,8 @@ public class DartVmServiceDebugProcess extends XDebugProcess {
       @Override
       public void sessionPaused() {
         // This can be removed if XFramesView starts popping the project window to the top of the z-axis stack.
-        Project project = getSession().getProject();
-        focusProject(project);
+        final Project project = getSession().getProject();
+        ProjectUtil.focusProjectWindow(project, true);
         stackFrameChanged();
       }
 
@@ -258,8 +239,8 @@ public class DartVmServiceDebugProcess extends XDebugProcess {
         return;
       }
 
-      // "Flutter run" has given us a websocket; we can assume it's ready immediately,
-      // because "flutter run" has already connected to it.
+      // "flutter run" has given us a websocket; we can assume it's ready immediately, because
+      // "flutter run" has already connected to it.
       final VmService vmService;
       final VmOpenSourceLocationListener vmOpenSourceLocationListener;
       try {
@@ -268,8 +249,7 @@ public class DartVmServiceDebugProcess extends XDebugProcess {
       }
       catch (IOException | RuntimeException e) {
         onConnectFailed("Failed to connect to the VM observatory service at: " + url + "\n"
-                        + e.toString() + "\n" +
-                        formatStackTraces(e));
+                        + e.toString() + "\n" + formatStackTraces(e));
         return;
       }
       onConnectSucceeded(vmService, vmOpenSourceLocationListener);
@@ -288,12 +268,6 @@ public class DartVmServiceDebugProcess extends XDebugProcess {
     myVmServiceWrapper.handleDebuggerConnected();
 
     myVmConnected = true;
-  }
-
-  @NotNull
-  @Deprecated // returns incorrect URL for Dart SDK 1.22+ because returned URL doesn't contain auth token
-  private String getObservatoryUrl(@NotNull final String scheme, @Nullable final String path) {
-    return scheme + "://" + myDebuggingHost + ":" + myObservatoryPort + StringUtil.notNullize(path);
   }
 
   @Override
@@ -391,7 +365,7 @@ public class DartVmServiceDebugProcess extends XDebugProcess {
 
   public void isolateSuspended(@NotNull final IsolateRef isolateRef) {
     final String id = isolateRef.getId();
-    assert(!mySuspendedIsolateIds.containsKey(id));
+    assert (!mySuspendedIsolateIds.containsKey(id));
     if (!mySuspendedIsolateIds.containsKey(id)) {
       mySuspendedIsolateIds.put(id, new CompletableFuture<>());
     }
@@ -406,10 +380,10 @@ public class DartVmServiceDebugProcess extends XDebugProcess {
     if (future == null) {
       // Isolate wasn't actually suspended.
       return CompletableFuture.completedFuture(null);
-    } else {
+    }
+    else {
       return future;
     }
-
   }
 
   public boolean isIsolateAlive(@NotNull final String isolateId) {
@@ -604,13 +578,7 @@ public class DartVmServiceDebugProcess extends XDebugProcess {
               ApplicationManager.getApplication().invokeLater(() -> ApplicationManager.getApplication().runWriteAction(() -> {
                 info.navigate(project);
 
-                if (SystemInfo.isLinux) {
-                  // TODO(cbernaschina): remove when ProjectUtil.focusProjectWindow(project, true); works as expected.
-                  focusProject(project);
-                }
-                else {
-                  ProjectUtil.focusProjectWindow(project, true);
-                }
+                ProjectUtil.focusProjectWindow(project, true);
               }));
             }
           });
@@ -671,57 +639,6 @@ public class DartVmServiceDebugProcess extends XDebugProcess {
     if (uri.startsWith("file:/")) return "file:///" + uri.substring("file:/".length());
     if (uri.startsWith("file:")) return "file:///" + uri.substring("file:".length());
     return uri;
-  }
-
-  private static void focusProject(@NotNull Project project) {
-    final JFrame projectFrame = WindowManager.getInstance().getFrame(project);
-    final int frameState = projectFrame.getExtendedState();
-
-    if (BitUtil.isSet(frameState, java.awt.Frame.ICONIFIED)) {
-      // restore the frame if it is minimized
-      projectFrame.setExtendedState(frameState ^ java.awt.Frame.ICONIFIED);
-      projectFrame.toFront();
-    }
-    else {
-      final JFrame anchor = new JFrame();
-      anchor.setType(Window.Type.UTILITY);
-      anchor.setUndecorated(true);
-      anchor.setSize(0, 0);
-      anchor.addWindowListener(new WindowListener() {
-        @Override
-        public void windowOpened(WindowEvent e) {
-        }
-
-        @Override
-        public void windowClosing(WindowEvent e) {
-        }
-
-        @Override
-        public void windowClosed(WindowEvent e) {
-        }
-
-        @Override
-        public void windowIconified(WindowEvent e) {
-        }
-
-        @Override
-        public void windowDeiconified(WindowEvent e) {
-        }
-
-        @Override
-        public void windowActivated(WindowEvent e) {
-          projectFrame.setVisible(true);
-          anchor.dispose();
-        }
-
-        @Override
-        public void windowDeactivated(WindowEvent e) {
-        }
-      });
-      anchor.pack();
-      anchor.setVisible(true);
-      anchor.toFront();
-    }
   }
 
   public interface PositionMapper {

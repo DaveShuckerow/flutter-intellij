@@ -1,3 +1,69 @@
+## 35.1.3
+- Support IntelliJ 2019.1.2 RC
+- Support Android Studio 3.5 beta 1
+- Bug fixes
+
+## 35.1
+- Add an option to hide closing labels in Dart source code when UI guides are on (#3438)
+- Create "Editor" section of Flutter Settings (#3434)
+- Support UI as Code Widget Guides (#3420)
+- Add checkbox to skip the dart analyzer error check before a hot reload (#3414)
+- Remove the option to disable the memory view from the settings (#3408)
+- Track API changes (#3427)
+
+## 35.0
+- Sample panel layout improvements (#3396)
+- Remove unneeded logging (#3394)
+- Java analysis lints cleanup (#3395)
+- Update subscriptions after analysis server restart (#3393)
+- Read sample index from flutter_tool call (#3379)
+- Update README (#3387)
+- Fix unit tests
+- Update build for canary 11 (#3380)
+- Integration test update (#3374)
+- Make the inspector easier to test (#3373)
+- Adjust build to make plugin for testing (#3366)
+- Address reported Java lints (#3356)
+- Adjust build for AS canary 10
+- Address an array index out of bounds (#3355)
+- Address an NPE (#3354)
+- Upgrade the service protocol library (#3353)
+- Address a number format exception (#3352)
+- Update how we manipulate the service protocol url (#3351)
+- Remove some uses of reflection (#3350)
+- Some initial work for FlutterWeb apps (#3342)
+- Fix an NPE when sample content generation is disabled (#3336)
+- Add inspector dependency to test (#3316)
+- Make Dart constructor calls pop out in light mode  (#3327)
+
+## 34.0
+- Update build for Android Studio 3.3.2 and IntelliJ 2019.1 (#3321)
+- Fix issue preventing plugin from working in AS Canary 8 (#3321)
+- Provides a better display if the variable has a `toStringDeep()` method defined. (#3291)
+- Don't show a background square in the inspector summary tree. (#3326)
+- Make FlutterModuleUtils consistently robust to disposed projects. (#3323)
+- Fix NPE issue sometimes hit evaluating expressions. (#3324)
+- Fix widget names. (#3322)
+- Make Perf and Inspector views only display when a Flutter app is being debugged. (#3320)
+- Support the inspector for flutter_web libraries. (#3310)
+- Detect when integrations tests are running (#3308)
+- Add in support for reloading and restarting all running apps (#3268)
+- Log tree path selection fixes (#3302)
+- Throttle logger updates (#3280)
+- New method in FlutterUtils: declaresFlutterWeb, this method checks for dependencies: fluttler_web in a pubspec file. (#3275)
+- Update a comment in FlutterSaveActionsManager (#3277)
+- Remove the second parameter (the Project) from SdkFields constructor, it isn't used anymore. (#3261)
+- Add a comment to a recent change (#3267)
+- Fix a file handle leak (#3264)
+- Port inferPubRootDirectoryIfNeeded from devtools (#3242)
+- Add support for matching customized Widget tests. (#3249)
+- Hide DevTools debugger when launching from IntelliJ. (#3252)
+- Migrate to GearPlain (#3248)
+- Minor cleanup (#3247)
+- Inline sample index reading (#3245)
+- Make a newer daemon protocol field optional (#3230)
+- Link to the plugins readme file from the building instructions. (#3222)
+
 ## 33.3
 - Fix an issue with an IllegalArgumentException when running Flutter apps
 

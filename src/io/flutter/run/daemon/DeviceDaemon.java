@@ -16,6 +16,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.CharsetToolkit;
+import com.intellij.util.io.BaseOutputReader;
 import io.flutter.FlutterMessages;
 import io.flutter.FlutterUtils;
 import io.flutter.android.IntelliJAndroidSdk;
@@ -140,7 +141,14 @@ class DeviceDaemon {
 
     try {
       final String path = FlutterSdkUtil.pathToFlutterTool(sdk.getHomePath());
-      return new Command(sdk.getHomePath(), path, ImmutableList.of("daemon"), androidHome);
+      final ImmutableList<String> list;
+      if (FlutterUtils.isIntegrationTestingMode()) {
+        list = ImmutableList.of("--show-test-device", "daemon");
+      }
+      else {
+        list = ImmutableList.of("daemon");
+      }
+      return new Command(sdk.getHomePath(), path, list, androidHome);
     }
     catch (ExecutionException e) {
       FlutterUtils.warn(LOG, "Unable to calculate command to watch Flutter devices", e);
@@ -190,7 +198,18 @@ class DeviceDaemon {
                        Consumer<String> processStopped) throws ExecutionException {
       final int daemonId = nextDaemonId.incrementAndGet();
       LOG.info("starting Flutter device daemon #" + daemonId + ": " + toString());
-      final ProcessHandler process = new OSProcessHandler(toCommandLine());
+      final ProcessHandler process = new OSProcessHandler(toCommandLine()) {
+        /**
+         * Return BaseOutputReader.Options.forMostlySilentProcess() in order to reduce cpu usage
+         * of the device daemon process (this also address a log message in the IntelliJ log).
+         */
+        @NotNull
+        @Override
+        protected BaseOutputReader.Options readerOptions() {
+          return BaseOutputReader.Options.forMostlySilentProcess();
+        }
+      };
+
       boolean succeeded = false;
       try {
         final AtomicReference<ImmutableList<FlutterDevice>> devices = new AtomicReference<>(ImmutableList.of());
@@ -313,12 +332,12 @@ class DeviceDaemon {
     // daemon domain
 
     @Override
-    public void onDaemonLogMessage(@NotNull DaemonEvent.LogMessage message) {
+    public void onDaemonLogMessage(@NotNull DaemonEvent.DaemonLogMessage message) {
       LOG.info("flutter device daemon #" + daemonId + ": " + message.message);
     }
 
     @Override
-    public void onDaemonShowMessage(@NotNull DaemonEvent.ShowMessage event) {
+    public void onDaemonShowMessage(@NotNull DaemonEvent.DaemonShowMessage event) {
       if ("error".equals(event.level)) {
         FlutterMessages.showError(event.title, event.message);
       }
