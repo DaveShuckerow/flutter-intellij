@@ -19,8 +19,10 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.event.CaretEvent;
 import com.intellij.openapi.editor.event.CaretListener;
 import com.intellij.openapi.editor.event.EditorEventMulticaster;
+import com.intellij.openapi.editor.ex.DocumentEx;
 import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.fileEditor.*;
+import com.intellij.openapi.fileEditor.impl.FileOffsetsManager;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.io.FileUtil;
@@ -47,7 +49,7 @@ public class WidgetIndentsHighlightingPassFactory implements TextEditorHighlight
   // widget indent guide lines after editing code containing guides.
   private static final boolean SIMULATE_SLOW_ANALYSIS_UPDATES = false;
 
-  private final Project project;
+  private Project project;
   private final FlutterDartAnalysisServer flutterDartAnalysisService;
   /**
    * Outlines for the currently visible files.
@@ -65,6 +67,9 @@ public class WidgetIndentsHighlightingPassFactory implements TextEditorHighlight
   private boolean isDisableDartClosingLabels;
 
   private final FlutterSettings.Listener settingsListener = () -> {
+    if (project == null || project.isDisposed()) {
+      return;
+    }
     final FlutterSettings settings = FlutterSettings.getInstance();
     // Skip if none of the settings that impact Widget Idents were changed.
     if (isShowBuildMethodGuides == settings.isShowBuildMethodGuides() &&
@@ -99,6 +104,7 @@ public class WidgetIndentsHighlightingPassFactory implements TextEditorHighlight
       public void caretPositionChanged(@NotNull CaretEvent event) {
         final Editor editor = event.getEditor();
         if (editor.getProject() != project) return;
+        if (editor.isDisposed() || project.isDisposed()) return;
         if (!(editor instanceof EditorEx)) return;
         final EditorEx editorEx = (EditorEx)editor;
         WidgetIndentsHighlightingPass.onCaretPositionChanged(editorEx, event.getCaret());
@@ -114,6 +120,9 @@ public class WidgetIndentsHighlightingPassFactory implements TextEditorHighlight
   }
 
   List<EditorEx> getActiveDartEditors() {
+    if (project.isDisposed()) {
+      return Collections.emptyList();
+    }
     final FileEditor[] editors = FileEditorManager.getInstance(project).getSelectedEditors();
     final List<EditorEx> dartEditors = new ArrayList<>();
     for (FileEditor fileEditor : editors) {
@@ -128,18 +137,26 @@ public class WidgetIndentsHighlightingPassFactory implements TextEditorHighlight
   }
 
   private void clearListeners() {
-    for (Map.Entry<String, FlutterOutlineListener> entry : outlineListeners.entrySet()) {
-      final String path = entry.getKey();
-      final FlutterOutlineListener listener = outlineListeners.remove(path);
-      if (listener != null) {
-        flutterDartAnalysisService.removeOutlineListener(path, listener);
+    synchronized (outlineListeners) {
+      for (Map.Entry<String, FlutterOutlineListener> entry : outlineListeners.entrySet()) {
+        final String path = entry.getKey();
+        final FlutterOutlineListener listener = outlineListeners.remove(path);
+        if (listener != null) {
+          flutterDartAnalysisService.removeOutlineListener(path, listener);
+        }
       }
+      outlineListeners.clear();
     }
-    outlineListeners.clear();
-    currentOutlines.clear();
+    synchronized (currentOutlines) {
+      currentOutlines.clear();
+    }
   }
 
   private void updateActiveEditors() {
+    if (project.isDisposed()) {
+      return;
+    }
+
     if (!FlutterSettings.getInstance().isShowBuildMethodGuides()) {
       clearListeners();
       return;
@@ -156,8 +173,8 @@ public class WidgetIndentsHighlightingPassFactory implements TextEditorHighlight
     }
 
     // Remove obsolete outline listeners.
+    final List<String> obsoletePaths = new ArrayList<>();
     synchronized (outlineListeners) {
-      final List<String> obsoletePaths = new ArrayList<>();
       for (final String path : outlineListeners.keySet()) {
         if (!newPaths.contains(path)) {
           obsoletePaths.add(path);
@@ -168,9 +185,6 @@ public class WidgetIndentsHighlightingPassFactory implements TextEditorHighlight
         if (listener != null) {
           flutterDartAnalysisService.removeOutlineListener(path, listener);
         }
-        // Clear the current outline as it may become out of date before the
-        // file is visible again.
-        currentOutlines.remove(path);
       }
 
       // Register new outline listeners.
@@ -191,6 +205,9 @@ public class WidgetIndentsHighlightingPassFactory implements TextEditorHighlight
               // Find visible editors for the path. If the file is not actually
               // being displayed on screen, there is no need to go through the
               // work of updating the outline.
+              if (project.isDisposed()) {
+                return;
+              }
               for (EditorEx editor : getActiveDartEditors()) {
                 if (!editor.isDisposed() && Objects.equals(editor.getVirtualFile().getCanonicalPath(), path)) {
                   runWidgetIndentsPass(editor, outline);
@@ -200,6 +217,14 @@ public class WidgetIndentsHighlightingPassFactory implements TextEditorHighlight
           };
         outlineListeners.put(path, listener);
         flutterDartAnalysisService.addOutlineListener(FileUtil.toSystemDependentName(path), listener);
+      }
+    }
+
+    synchronized (currentOutlines) {
+      for (final String path : obsoletePaths) {
+        // Clear the current outline as it may become out of date before the
+        // file is visible again.
+        currentOutlines.remove(path);
       }
     }
   }
@@ -282,12 +307,15 @@ public class WidgetIndentsHighlightingPassFactory implements TextEditorHighlight
       return;
     }
 
+    final VirtualFile file = editor.getVirtualFile();
+    if (!FlutterUtils.couldContainWidgets(file)) {
+      return;
+    }
     // If the editor and the outline have different lengths then
     // the outline is out of date and cannot safely be displayed.
-    if (editor.getDocument().getTextLength() != outline.getLength() &&
-        // Workaround windows bug where the outline and document content have inconsistent lengths until the file is modified.
-        editor.getDocument().getModificationStamp() != 0) {
-
+    FileOffsetsManager offsetManager = FileOffsetsManager.getInstance();
+    final DocumentEx document = editor.getDocument();
+    if (document.getTextLength() != offsetManager.getConvertedOffset(file, outline.getLength())) {
       // Outline is out of date. That is ok. Ignore it for now.
       // An up to date outline will probably arive shortly. Showing an
       // outline from data inconsistent with the current
