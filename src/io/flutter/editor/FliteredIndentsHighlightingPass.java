@@ -3,7 +3,7 @@
 /*
  * @author max
  */
-package com.intellij.codeInsight.daemon.impl;
+package io.flutter.editor;
 
 import com.intellij.codeHighlighting.TextEditorHighlightingPass;
 import com.intellij.codeInsight.highlighting.BraceMatcher;
@@ -46,7 +46,15 @@ import java.awt.*;
 import java.util.*;
 import java.util.List;
 
-public class IndentsPass extends TextEditorHighlightingPass implements DumbAware {
+import static java.lang.Math.min;
+
+/**
+ * This is an FliteredIndentsHighlightingPass class forked from com.intellij.codeInsight.daemon.impl.FliteredIndentsHighlightingPass
+ * that supports filtering out indent guides that conflict with widget indent
+ * guides as determined by calling WidgetIndentsHighlightingPass.isIndentGuideHidden.
+ */
+@SuppressWarnings("ALL")
+public class FliteredIndentsHighlightingPass extends TextEditorHighlightingPass implements DumbAware {
   private static final Key<List<RangeHighlighter>> INDENT_HIGHLIGHTERS_IN_EDITOR_KEY = Key.create("INDENT_HIGHLIGHTERS_IN_EDITOR_KEY");
   private static final Key<Long> LAST_TIME_INDENTS_BUILT = Key.create("LAST_TIME_INDENTS_BUILT");
 
@@ -59,9 +67,10 @@ public class IndentsPass extends TextEditorHighlightingPass implements DumbAware
   private static final CustomHighlighterRenderer RENDERER = (editor, highlighter, g) -> {
     int startOffset = highlighter.getStartOffset();
     final Document doc = highlighter.getDocument();
-    if (startOffset >= doc.getTextLength()) return;
+    final int textLength = doc.getTextLength();
+    if (startOffset >= textLength) return;
 
-    final int endOffset = highlighter.getEndOffset();
+    final int endOffset = min(highlighter.getEndOffset(), textLength);
     final int endLine = doc.getLineNumber(endOffset);
 
     int off;
@@ -123,7 +132,12 @@ public class IndentsPass extends TextEditorHighlightingPass implements DumbAware
       if (clip.y >= maxY || clip.y + clip.height <= start.y) {
         return;
       }
-      maxY = Math.min(maxY, clip.y + clip.height);
+      maxY = min(maxY, clip.y + clip.height);
+    }
+
+    if (WidgetIndentsHighlightingPass.isIndentGuideHidden(editor, new LineRange(startLine, endPosition.line))) {
+      // Avoid rendering this guide as it overlaps with the Widget indent guides.
+      return;
     }
 
     final EditorColorsScheme scheme = editor.getColorsScheme();
@@ -180,10 +194,84 @@ public class IndentsPass extends TextEditorHighlightingPass implements DumbAware
     }
   };
 
-  IndentsPass(@NotNull Project project, @NotNull Editor editor, @NotNull PsiFile file) {
+  // TODO(jacobr): some of this logic to compute what portion of the guide to
+  //  render is duplicated from RENDERER.
+  static io.flutter.editor.LineRange getGuideLineRange(Editor editor, RangeHighlighter highlighter) {
+    final int startOffset = highlighter.getStartOffset();
+    final Document doc = highlighter.getDocument();
+    final int textLength = doc.getTextLength();
+    if (startOffset >= textLength || !highlighter.isValid()) return null;
+
+    final int endOffset = min(highlighter.getEndOffset(), textLength);
+    final int endLine = doc.getLineNumber(endOffset);
+
+    int off;
+    int startLine = doc.getLineNumber(startOffset);
+    final IndentGuideDescriptor descriptor = editor.getIndentsModel().getDescriptor(startLine, endLine);
+
+    final CharSequence chars = doc.getCharsSequence();
+    do {
+      final int start = doc.getLineStartOffset(startLine);
+      final int end = doc.getLineEndOffset(startLine);
+      off = CharArrayUtil.shiftForward(chars, start, end, " \t");
+      startLine--;
+    }
+    while (startLine > 1 && off < textLength && chars.charAt(off) == '\n');
+
+    final VisualPosition startPosition = editor.offsetToVisualPosition(off);
+    int indentColumn = startPosition.column;
+
+    // It's considered that indent guide can cross not only white space but comments, javadoc etc. Hence, there is a possible
+    // case that the first indent guide line is, say, single-line comment where comment symbols ('//') are located at the first
+    // visual column. We need to calculate correct indent guide column then.
+    int lineShift = 1;
+    if (indentColumn <= 0 && descriptor != null) {
+      indentColumn = descriptor.indentLevel;
+      lineShift = 0;
+    }
+    if (indentColumn <= 0) return null;
+
+    final FoldingModel foldingModel = editor.getFoldingModel();
+    if (foldingModel.isOffsetCollapsed(off)) return null;
+
+    final FoldRegion headerRegion = foldingModel.getCollapsedRegionAtOffset(doc.getLineEndOffset(doc.getLineNumber(off)));
+    final FoldRegion tailRegion = foldingModel.getCollapsedRegionAtOffset(doc.getLineStartOffset(doc.getLineNumber(endOffset)));
+
+    if (tailRegion != null && tailRegion == headerRegion) return null;
+
+    final VisualPosition endPosition = editor.offsetToVisualPosition(endOffset);
+    return new io.flutter.editor.LineRange(startLine, endPosition.line);
+  }
+
+  FliteredIndentsHighlightingPass(@NotNull Project project, @NotNull Editor editor, @NotNull PsiFile file) {
     super(project, editor.getDocument(), false);
     myEditor = (EditorEx)editor;
     myFile = file;
+  }
+
+  public static void onWidgetIndentsChanged(EditorEx editor, WidgetIndentHitTester oldHitTester, WidgetIndentHitTester newHitTester) {
+    final List<RangeHighlighter> highlighters = editor.getUserData(INDENT_HIGHLIGHTERS_IN_EDITOR_KEY);
+    if (highlighters != null) {
+      final Document doc = editor.getDocument();
+      final int textLength = doc.getTextLength();
+      for (RangeHighlighter highlighter : highlighters) {
+        if (!highlighter.isValid()) {
+          continue;
+        }
+        final LineRange range = getGuideLineRange(editor, highlighter);
+        if (range != null) {
+          final boolean before = WidgetIndentsHighlightingPass.isIndentGuideHidden(oldHitTester, range);
+          final boolean after = WidgetIndentsHighlightingPass.isIndentGuideHidden(newHitTester, range);
+          if (before != after) {
+            int safeStart = min(highlighter.getStartOffset(), textLength);
+            int safeEnd = min(highlighter.getEndOffset(), textLength);
+            if (safeEnd > safeStart) {
+              editor.repaint(safeStart, safeEnd);
+            }
+          }
+        }
+      }
+    }
   }
 
   @Override
@@ -194,10 +282,10 @@ public class IndentsPass extends TextEditorHighlightingPass implements DumbAware
 
     myDescriptors = buildDescriptors();
 
-    ArrayList<TextRange> ranges = new ArrayList<>();
+    final ArrayList<TextRange> ranges = new ArrayList<>();
     for (IndentGuideDescriptor descriptor : myDescriptors) {
       ProgressManager.checkCanceled();
-      int endOffset =
+      final int endOffset =
         descriptor.endLine < myDocument.getLineCount() ? myDocument.getLineStartOffset(descriptor.endLine) : myDocument.getTextLength();
       ranges.add(new TextRange(myDocument.getLineStartOffset(descriptor.startLine), endOffset));
     }
@@ -207,7 +295,10 @@ public class IndentsPass extends TextEditorHighlightingPass implements DumbAware
   }
 
   private long nowStamp() {
-    if (!myEditor.getSettings().isIndentGuidesShown()) return -1;
+    // If regular indent guides are being shown then the user has disabled
+    // the custom WidgetIndentGuides and we should skip this pass in favor
+    // of the regular indent guides instead of our fork.
+    if (myEditor.getSettings().isIndentGuidesShown()) return -1;
     assert myDocument != null;
     return myDocument.getModificationStamp();
   }
@@ -271,7 +362,10 @@ public class IndentsPass extends TextEditorHighlightingPass implements DumbAware
   }
 
   private List<IndentGuideDescriptor> buildDescriptors() {
-    if (!myEditor.getSettings().isIndentGuidesShown()) return Collections.emptyList();
+    // If regular indent guides are being shown then the user has disabled
+    // the custom WidgetIndentGuides and we should skip this pass in favor
+    // of the regular indent guides instead of our fork.
+    if (myEditor.getSettings().isIndentGuidesShown()) return Collections.emptyList();
 
     IndentsCalculator calculator = new IndentsCalculator();
     calculator.calculate();
@@ -419,7 +513,7 @@ public class IndentsPass extends TextEditorHighlightingPass implements DumbAware
 
           int bottomIndent = line < lineIndents.length ? lineIndents[line] : topIndent;
 
-          int indent = Math.min(topIndent, bottomIndent);
+          int indent = min(topIndent, bottomIndent);
           if (bottomIndent < topIndent) {
             int lineStart = myDocument.getLineStartOffset(line);
             int lineEnd = myDocument.getLineEndOffset(line);
@@ -432,7 +526,7 @@ public class IndentsPass extends TextEditorHighlightingPass implements DumbAware
 
           for (int blankLine = startLine; blankLine < line; blankLine++) {
             assert lineIndents[blankLine] == -1;
-            lineIndents[blankLine] = - Math.min(topIndent, indent);
+            lineIndents[blankLine] = - min(topIndent, indent);
           }
 
           //noinspection AssignmentToForLoopParameter
