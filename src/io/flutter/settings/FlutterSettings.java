@@ -12,9 +12,7 @@ import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.EventDispatcher;
 import io.flutter.analytics.Analytics;
-import io.flutter.bazel.Workspace;
 import io.flutter.sdk.FlutterSdk;
-import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.EventListener;
@@ -22,6 +20,7 @@ import java.util.List;
 
 public class FlutterSettings {
   private static final String reloadOnSaveKey = "io.flutter.reloadOnSave";
+  private static final String reloadWithErrorKey = "io.flutter.reloadWithError";
   private static final String openInspectorOnAppLaunchKey = "io.flutter.openInspectorOnAppLaunch";
   private static final String verboseLoggingKey = "io.flutter.verboseLogging";
   private static final String formatCodeOnSaveKey = "io.flutter.formatCodeOnSave";
@@ -32,8 +31,6 @@ public class FlutterSettings {
   private static final String legacyTrackWidgetCreationKey = "io.flutter.trackWidgetCreation";
   private static final String disableTrackWidgetCreationKey = "io.flutter.disableTrackWidgetCreation";
   private static final String useFlutterLogView = "io.flutter.useLogView";
-  private static final String memoryProfilerKey = "io.flutter.memoryProfiler";
-  private static final String newBazelTestRunnerKey = "io.flutter.bazel.legacyTestBehavior";
 
   public static FlutterSettings getInstance() {
     return ServiceManager.getService(FlutterSettings.class);
@@ -61,6 +58,9 @@ public class FlutterSettings {
 
     if (isReloadOnSave()) {
       analytics.sendEvent("settings", afterLastPeriod(reloadOnSaveKey));
+    }
+    if (isReloadWithError()) {
+      analytics.sendEvent("settings", afterLastPeriod(reloadWithErrorKey));
     }
     if (isOpenInspectorOnAppLaunch()) {
       analytics.sendEvent("settings", afterLastPeriod(openInspectorOnAppLaunchKey));
@@ -105,6 +105,10 @@ public class FlutterSettings {
     return getPropertiesComponent().getBoolean(reloadOnSaveKey, true);
   }
 
+  public boolean isReloadWithError() {
+    return getPropertiesComponent().getBoolean(reloadWithErrorKey, false);
+  }
+
   // TODO(jacobr): remove after 0.10.2 is the default.
   public boolean isLegacyTrackWidgetCreation() {
     return getPropertiesComponent().getBoolean(legacyTrackWidgetCreationKey, false);
@@ -137,6 +141,12 @@ public class FlutterSettings {
 
   public void setReloadOnSave(boolean value) {
     getPropertiesComponent().setValue(reloadOnSaveKey, value, true);
+
+    fireEvent();
+  }
+
+  public void setReloadWithError(boolean value) {
+    getPropertiesComponent().setValue(reloadWithErrorKey, value, false);
 
     fireEvent();
   }
@@ -228,16 +238,6 @@ public class FlutterSettings {
 
   public void setVerboseLogging(boolean value) {
     getPropertiesComponent().setValue(verboseLoggingKey, value, false);
-
-    fireEvent();
-  }
-
-  public boolean isMemoryProfilerDisabled() {
-    return getPropertiesComponent().getBoolean(memoryProfilerKey, false);
-  }
-
-  public void setMemoryProfilerDisabled(boolean value) {
-    getPropertiesComponent().setValue(memoryProfilerKey, value, false);
 
     fireEvent();
   }
