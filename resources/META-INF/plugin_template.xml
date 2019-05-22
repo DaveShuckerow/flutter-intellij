@@ -299,6 +299,7 @@
     <library.type implementation="io.flutter.sdk.FlutterPluginLibraryType"/>
 
     <projectStructureDetector implementation="io.flutter.project.FlutterProjectStructureDetector"/>
+    <declarationRangeHandler implementationClass="io.flutter.dart.DartDeclarationRangeHandler"/>
     <colorSettingsPage implementation="io.flutter.logging.FlutterLogColorPage"/>
     <additionalTextAttributes scheme="Default" file="colorSchemes/FlutterLogColorSchemeDefault.xml"/>
     <additionalTextAttributes scheme="Default" file="colorSchemes/FlutterCodeColorSchemeDefault.xml"/>
