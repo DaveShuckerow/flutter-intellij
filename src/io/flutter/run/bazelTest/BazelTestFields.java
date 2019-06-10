@@ -199,14 +199,18 @@ public class BazelTestFields {
     commandLine.setCharset(CharsetToolkit.UTF8_CHARSET);
     commandLine.setExePath(FileUtil.toSystemDependentName(launchingScript));
 
+    final String nonNullArgs = StringUtil.notNullize(additionalArgs);
+
     // User specified additional target arguments.
-    final CommandLineTokenizer testArgsTokenizer = new CommandLineTokenizer(
-      StringUtil.notNullize(additionalArgs));
+    final CommandLineTokenizer testArgsTokenizer = new CommandLineTokenizer(nonNullArgs);
     while (testArgsTokenizer.hasMoreTokens()) {
       commandLine.addParameter(testArgsTokenizer.nextToken());
     }
-
     commandLine.addParameter(Flags.noColor);
+    // If the user did not turn the --machine flag off, we will pass it to the test runner.
+    if (!nonNullArgs.contains(Flags.noMachine)) {
+      commandLine.addParameter(Flags.machine);
+    }
     final String relativeEntryFilePath = entryFile == null
                                          ? null
                                          : FileUtil.getRelativePath(workspace.getRoot().getPath(), entryFile, '/');
@@ -248,7 +252,7 @@ public class BazelTestFields {
    * See {@link BazelWatchTestConfigProducer} and {@link WatchFactory} for more information.
    */
   public boolean isWatchConfig() {
-    return getAdditionalArgs() != null && getAdditionalArgs().contains("--watch");
+    return getAdditionalArgs() != null && getAdditionalArgs().contains(Flags.watch);
   }
 
   /**
@@ -353,6 +357,11 @@ public class BazelTestFields {
    */
   final static class Flags {
     /**
+     * Flag passed to the test runner script.  Tells it to watch files, and re-run tests when the run completes.
+     */
+    static String watch = "--watch";
+
+    /**
      * Flag passed to the test runner script.  Tells it to display results without any special text coloring.
      */
     static String noColor = "--no-color";
@@ -376,6 +385,12 @@ public class BazelTestFields {
      * Option passed to the bazel test runner.  Tells it to report test status in machine-readable JSON to show results in the UI.
      */
     static String machine = "--machine";
+
+    /**
+     * Option passed to the bazel test runner.  Tells it to report test status without machine-readable JSON and not show detailed results
+     * in the UI.
+     */
+    static String noMachine = "--no-machine";
 
     // Don't allow construction of this class.
     private Flags() {
