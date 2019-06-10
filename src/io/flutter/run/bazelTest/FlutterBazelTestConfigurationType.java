@@ -82,7 +82,8 @@ public class FlutterBazelTestConfigurationType extends ConfigurationTypeBase {
       // This is always called first when loading a run config, even when it's a non-template config.
       // See RunManagerImpl.doCreateConfiguration
       BazelTestConfig config = new BazelTestConfig(project, this, FlutterBundle.message("runner.flutter.bazel.test.configuration.name"));
-      config.setFields(new BazelTestFields(null, null, null, "--watch"));
+      // TODO(djshuckerow): To make test watching work well with the detailed test output, we need to reset the test window every re-run.
+      config.setFields(new BazelTestFields(null, null, null, "--watch --no-machine"));
       return config;
     }
 
